@@ -11,6 +11,7 @@ CLAUDE = Engine(
     default_args=(
         "--dangerously-skip-permissions",
         "--print",
+        "--verbose",
         "--output-format",
         "stream-json",
     ),

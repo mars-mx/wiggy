@@ -1,11 +1,21 @@
 FROM ghcr.io/mars-mx/wiggy-base:latest
 
-# Install Claude Code via native installer
+# Switch to wiggy user for Claude installation
+USER wiggy
+
+# Install Claude Code (installs to ~/.local/bin = /workspace/.local/bin)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Copy entrypoint script
+# Update PATH for wiggy user (home is /workspace)
+ENV PATH="/workspace/.local/bin:${PATH}"
+
+# Copy entrypoint script (root can write to /usr/local/bin)
+USER root
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Run as wiggy
+USER wiggy
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["claude"]

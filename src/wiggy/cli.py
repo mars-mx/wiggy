@@ -9,6 +9,7 @@ from wiggy.executors import DEFAULT_EXECUTOR, EXECUTORS
 from wiggy.executors.base import Executor
 from wiggy.executors.docker import DockerExecutor
 from wiggy.executors.shell import ShellExecutor
+from wiggy.monitor import Monitor
 from wiggy.runner import resolve_engine
 
 
@@ -59,12 +60,17 @@ def main(ctx: click.Context) -> None:
     default=1,
     help="Number of executor instances to spawn in parallel.",
 )
+@click.option(
+    "--model", "-m",
+    help="Model to use (overrides engine default). Passed to engine CLI.",
+)
 def run(
     prompt: str | None,
     engine: str | None,
     executor: str,
     image: str | None,
     parallel: int,
+    model: str | None,
 ) -> None:
     """Run the wiggy loop."""
     resolved_engine = resolve_engine(engine)
@@ -82,21 +88,30 @@ def run(
     console.print(f"[dim]Executor: {executor}, Parallel: {parallel}[/dim]")
     if image:
         console.print(f"[dim]Image override: {image}[/dim]")
+    if model:
+        console.print(f"[dim]Model override: {model}[/dim]")
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
     # Create executor instance
     exec_instance: Executor
     if executor == "docker":
-        exec_instance = DockerExecutor(image_override=image)
+        exec_instance = DockerExecutor(image_override=image, model_override=model)
     else:
-        exec_instance = ShellExecutor()
+        exec_instance = ShellExecutor(model_override=model)
+
+    # Create monitor for real-time status display
+    monitor = Monitor(resolved_engine.name, parallel, model=model)
 
     try:
         exec_instance.setup(resolved_engine, prompt)
-        for line in exec_instance.run():
-            console.print(line)
+        monitor.start()
+
+        for message in exec_instance.run():
+            monitor.update(1, message)  # executor_id = 1 for single executor
+
     finally:
+        monitor.stop()
         exec_instance.teardown()
 
     if exec_instance.exit_code != 0:

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 
 from wiggy.engines.base import Engine
+from wiggy.parsers.messages import ParsedMessage
 
 
 class Executor(ABC):
@@ -17,10 +18,10 @@ class Executor(ABC):
         ...
 
     @abstractmethod
-    def run(self) -> Iterator[str]:
+    def run(self) -> Iterator[ParsedMessage]:
         """Run the engine in the execution environment.
 
-        Yields stdout lines as they are produced.
+        Yields ParsedMessage objects as they are produced.
         """
         ...
 

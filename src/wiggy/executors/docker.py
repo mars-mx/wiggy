@@ -10,6 +10,8 @@ from docker.models.containers import Container
 from wiggy.console import console
 from wiggy.engines.base import Engine
 from wiggy.executors.base import Executor
+from wiggy.parsers import get_parser_for_engine
+from wiggy.parsers.messages import ParsedMessage
 
 # Mount point for credentials inside container
 CREDENTIALS_MOUNT = "/mnt/credentials"
@@ -20,8 +22,11 @@ class DockerExecutor(Executor):
 
     name = "docker"
 
-    def __init__(self, image_override: str | None = None) -> None:
+    def __init__(
+        self, image_override: str | None = None, model_override: str | None = None
+    ) -> None:
         self._image_override = image_override
+        self._model_override = model_override
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -63,10 +68,23 @@ class DockerExecutor(Executor):
 
     def _build_command(self, engine: Engine, prompt: str | None) -> list[str]:
         """Build the full command list for the engine."""
-        command = [engine.cli_command, *engine.default_args]
+        command = [engine.cli_command]
+        if self._model_override:
+            command.extend(["--model", self._model_override])
+        command.extend(engine.default_args)
         if prompt:
             command.append(prompt)
         return command
+
+    def _pull_image(self, client: docker.DockerClient, image: str) -> None:
+        """Pull the Docker image if not available locally."""
+        try:
+            client.images.get(image)
+            console.print(f"[dim]Image found locally: {image}[/dim]")
+        except docker.errors.ImageNotFound:
+            console.print(f"[dim]Pulling image: {image}[/dim]")
+            client.images.pull(image)
+            console.print(f"[dim]Pulled image: {image}[/dim]")
 
     def setup(self, engine: Engine, prompt: str | None = None) -> None:
         """Set up the Docker container for the given engine."""
@@ -74,7 +92,7 @@ class DockerExecutor(Executor):
         client = self._get_client()
 
         image = self._resolve_image(engine)
-        console.print(f"[dim]Using image: {image}[/dim]")
+        self._pull_image(client, image)
 
         volumes = self._get_volume_mounts(engine)
         environment = self._get_environment()
@@ -94,20 +112,30 @@ class DockerExecutor(Executor):
         console.print(f"[dim]Created container: {self._container.short_id}[/dim]")
         console.print(f"[dim]Command: {' '.join(command)}[/dim]")
 
-    def run(self) -> Iterator[str]:
+    def run(self) -> Iterator[ParsedMessage]:
         """Run the engine in a Docker container.
 
-        Yields stdout lines as they are produced.
+        Yields ParsedMessage objects as they are produced.
         """
-        if self._container is None:
+        if self._container is None or self._engine is None:
             raise RuntimeError("setup() must be called before run()")
+
+        # Get parser for this engine
+        parser = get_parser_for_engine(self._engine.name)
 
         self._container.start()
 
-        # Stream logs in real-time
+        # Stream logs in real-time, buffering into lines
+        buffer = ""
         for chunk in self._container.logs(stream=True, follow=True):
-            line = chunk.decode("utf-8", errors="replace")
-            yield line.rstrip("\n")
+            buffer += chunk.decode("utf-8", errors="replace")
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                yield parser.parse_line(line)
+
+        # Yield any remaining content
+        if buffer:
+            yield parser.parse_line(buffer)
 
         # Wait for container to finish and get exit code
         result = self._container.wait()
