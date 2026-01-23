@@ -1,6 +1,8 @@
 """Docker executor implementation."""
 
+import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import docker
 from docker.models.containers import Container
@@ -8,6 +10,9 @@ from docker.models.containers import Container
 from wiggy.console import console
 from wiggy.engines.base import Engine
 from wiggy.executors.base import Executor
+
+# Mount point for credentials inside container
+CREDENTIALS_MOUNT = "/mnt/credentials"
 
 
 class DockerExecutor(Executor):
@@ -36,6 +41,26 @@ class DockerExecutor(Executor):
             return engine.docker_image
         return "ghcr.io/mars-mx/wiggy-base:latest"
 
+    def _get_volume_mounts(self, engine: Engine) -> dict[str, dict[str, str]]:
+        """Build volume mount configuration from engine's credential_dir."""
+        volumes: dict[str, dict[str, str]] = {}
+        if engine.credential_dir:
+            cred_path = Path(engine.credential_dir).expanduser()
+            if cred_path.exists():
+                volumes[str(cred_path)] = {
+                    "bind": CREDENTIALS_MOUNT,
+                    "mode": "ro",
+                }
+        return volumes
+
+    def _get_environment(self) -> dict[str, str]:
+        """Build environment variables for container."""
+        env: dict[str, str] = {}
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            env["ANTHROPIC_API_KEY"] = api_key
+        return env
+
     def setup(self, engine: Engine) -> None:
         """Set up the Docker container for the given engine."""
         self._engine = engine
@@ -44,7 +69,9 @@ class DockerExecutor(Executor):
         image = self._resolve_image(engine)
         console.print(f"[dim]Using image: {image}[/dim]")
 
-        # Create container with project mounted
+        volumes = self._get_volume_mounts(engine)
+        environment = self._get_environment()
+
         self._container = client.containers.create(
             image=image,
             command=engine.cli_command,
@@ -52,6 +79,8 @@ class DockerExecutor(Executor):
             tty=True,
             stdin_open=True,
             detach=True,
+            volumes=volumes if volumes else None,
+            environment=environment if environment else None,
         )
 
         console.print(f"[dim]Created container: {self._container.short_id}[/dim]")

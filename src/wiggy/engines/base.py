@@ -12,6 +12,7 @@ class Engine:
     cli_command: str
     install_info: str
     docker_image: str | None = None
+    credential_dir: str | None = None  # Path to credentials (e.g., "~/.claude")
 
     def is_installed(self) -> bool:
         """Check if this engine's CLI command is available in PATH."""

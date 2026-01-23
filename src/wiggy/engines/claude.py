@@ -7,4 +7,5 @@ CLAUDE = Engine(
     cli_command="claude",
     install_info="https://github.com/anthropics/claude-code",
     docker_image="ghcr.io/mars-mx/wiggy-claude:latest",
+    credential_dir="~/.claude",
 )
