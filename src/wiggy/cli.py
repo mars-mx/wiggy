@@ -1,15 +1,18 @@
 """Command-line interface for wiggy."""
 
+from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
+
 import click
 
 from wiggy import __version__
+from wiggy.config.init import ensure_wiggy_dir
 from wiggy.config.preflight import run_all_checks
 from wiggy.console import console
-from wiggy.executors import DEFAULT_EXECUTOR, EXECUTORS
+from wiggy.executors import DEFAULT_EXECUTOR, EXECUTORS, get_executors
 from wiggy.executors.base import Executor
-from wiggy.executors.docker import DockerExecutor
-from wiggy.executors.shell import ShellExecutor
 from wiggy.monitor import Monitor
+from wiggy.parsers.messages import ParsedMessage
 from wiggy.runner import resolve_engine
 
 
@@ -33,6 +36,8 @@ def version_callback(ctx: click.Context, _param: click.Parameter, value: bool) -
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """Wiggy - Ralph Wiggum loop AI software development CLI."""
+    ensure_wiggy_dir()
+
     if ctx.invoked_subcommand is None:
         console.print("[bold]wiggy[/bold] - persistent iteration for AI development")
         console.print("\nRun [cyan]wiggy --help[/cyan] for available commands.")
@@ -93,29 +98,57 @@ def run(
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
-    # Create executor instance
-    exec_instance: Executor
-    if executor == "docker":
-        exec_instance = DockerExecutor(image_override=image, model_override=model)
-    else:
-        exec_instance = ShellExecutor(model_override=model)
+    # Create executor instances
+    executors = get_executors(
+        name=executor,
+        count=parallel,
+        image=image,
+        model=model,
+        quiet=True,
+    )
 
     # Create monitor for real-time status display
     monitor = Monitor(resolved_engine.name, parallel, model=model)
 
+    # Queue for messages from executor threads: (executor_id, message or None for done)
+    queue: Queue[tuple[int, ParsedMessage | None]] = Queue()
+
+    def run_single(ex: Executor) -> int | None:
+        """Run a single executor, pushing messages to the queue."""
+        ex.setup(resolved_engine, prompt)
+        try:
+            for msg in ex.run():
+                queue.put((ex.executor_id, msg))
+        finally:
+            ex.teardown()
+            queue.put((ex.executor_id, None))  # Signal completion
+        return ex.exit_code
+
     try:
-        exec_instance.setup(resolved_engine, prompt)
         monitor.start()
 
-        for message in exec_instance.run():
-            monitor.update(1, message)  # executor_id = 1 for single executor
+        with ThreadPoolExecutor(max_workers=parallel) as pool:
+            futures = [pool.submit(run_single, ex) for ex in executors]
+
+            # Process messages until all executors complete
+            completed = 0
+            while completed < parallel:
+                exec_id, msg = queue.get()
+                if msg is None:
+                    completed += 1
+                else:
+                    monitor.update(exec_id, msg)
+
+            # Collect exit codes
+            exit_codes = [f.result() for f in futures]
 
     finally:
         monitor.stop()
-        exec_instance.teardown()
 
-    if exec_instance.exit_code != 0:
-        raise SystemExit(exec_instance.exit_code or 1)
+    # Check for failures
+    failed = [code for code in exit_codes if code != 0]
+    if failed:
+        raise SystemExit(failed[0] or 1)
 
 
 @main.command()

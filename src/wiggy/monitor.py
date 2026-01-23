@@ -1,5 +1,7 @@
 """Real-time monitor for executor output using Rich."""
 
+from threading import Lock
+
 from rich.live import Live
 from rich.table import Table
 
@@ -24,6 +26,7 @@ class Monitor:
         self._executor_count = executor_count
         self._model = model
         self._statuses: dict[int, str] = {}
+        self._lock = Lock()
         self._live = Live(console=console, auto_refresh=False)
 
     def start(self) -> None:
@@ -54,8 +57,9 @@ class Monitor:
         # Replace newlines with spaces for single-line display
         content = content.replace("\n", " ")
 
-        self._statuses[executor_id] = content
-        self._refresh()
+        with self._lock:
+            self._statuses[executor_id] = content
+            self._refresh()
 
     def _refresh(self) -> None:
         """Refresh the live display."""

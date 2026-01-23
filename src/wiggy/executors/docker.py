@@ -23,10 +23,16 @@ class DockerExecutor(Executor):
     name = "docker"
 
     def __init__(
-        self, image_override: str | None = None, model_override: str | None = None
+        self,
+        image_override: str | None = None,
+        model_override: str | None = None,
+        executor_id: int = 1,
+        quiet: bool = False,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
+        self.executor_id = executor_id
+        self.quiet = quiet
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -80,11 +86,14 @@ class DockerExecutor(Executor):
         """Pull the Docker image if not available locally."""
         try:
             client.images.get(image)
-            console.print(f"[dim]Image found locally: {image}[/dim]")
+            if not self.quiet:
+                console.print(f"[dim]Image found locally: {image}[/dim]")
         except docker.errors.ImageNotFound:
-            console.print(f"[dim]Pulling image: {image}[/dim]")
+            if not self.quiet:
+                console.print(f"[dim]Pulling image: {image}[/dim]")
             client.images.pull(image)
-            console.print(f"[dim]Pulled image: {image}[/dim]")
+            if not self.quiet:
+                console.print(f"[dim]Pulled image: {image}[/dim]")
 
     def setup(self, engine: Engine, prompt: str | None = None) -> None:
         """Set up the Docker container for the given engine."""
@@ -109,8 +118,12 @@ class DockerExecutor(Executor):
             environment=environment if environment else None,
         )
 
-        console.print(f"[dim]Created container: {self._container.short_id}[/dim]")
-        console.print(f"[dim]Command: {' '.join(command)}[/dim]")
+        if not self.quiet:
+            console.print(f"[dim]Created container: {self._container.short_id}[/dim]")
+            console.print(f"[dim]Command: {' '.join(command)}[/dim]")
+
+        # Open log file for raw output
+        self._open_log()
 
     def run(self) -> Iterator[ParsedMessage]:
         """Run the engine in a Docker container.
@@ -131,10 +144,12 @@ class DockerExecutor(Executor):
             buffer += chunk.decode("utf-8", errors="replace")
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
+                self._write_log(line)
                 yield parser.parse_line(line)
 
         # Yield any remaining content
         if buffer:
+            self._write_log(buffer)
             yield parser.parse_line(buffer)
 
         # Wait for container to finish and get exit code
@@ -143,12 +158,14 @@ class DockerExecutor(Executor):
 
     def teardown(self) -> None:
         """Clean up the Docker container."""
+        self._close_log()
+
         if self._container is not None:
             try:
+                short_id = self._container.short_id
                 self._container.remove(force=True)
-                console.print(
-                    f"[dim]Removed container: {self._container.short_id}[/dim]"
-                )
+                if not self.quiet:
+                    console.print(f"[dim]Removed container: {short_id}[/dim]")
             except docker.errors.NotFound:
                 pass  # Already removed
             self._container = None

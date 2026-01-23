@@ -12,8 +12,15 @@ class ShellExecutor(Executor):
 
     name = "shell"
 
-    def __init__(self, model_override: str | None = None) -> None:
+    def __init__(
+        self,
+        model_override: str | None = None,
+        executor_id: int = 1,
+        quiet: bool = False,
+    ) -> None:
         self._model_override = model_override
+        self.executor_id = executor_id
+        self.quiet = quiet
         self._exit_code: int | None = None
 
     def setup(self, engine: Engine, prompt: str | None = None) -> None:
