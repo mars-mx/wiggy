@@ -12,7 +12,7 @@ class Executor(ABC):
     name: str
 
     @abstractmethod
-    def setup(self, engine: Engine) -> None:
+    def setup(self, engine: Engine, prompt: str | None = None) -> None:
         """Set up the execution environment for the given engine."""
         ...
 

@@ -6,6 +6,9 @@ from wiggy import __version__
 from wiggy.config.preflight import run_all_checks
 from wiggy.console import console
 from wiggy.executors import DEFAULT_EXECUTOR, EXECUTORS
+from wiggy.executors.base import Executor
+from wiggy.executors.docker import DockerExecutor
+from wiggy.executors.shell import ShellExecutor
 from wiggy.runner import resolve_engine
 
 
@@ -35,6 +38,7 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command()
+@click.argument("prompt", required=False)
 @click.option(
     "--engine", "-e",
     help="AI engine to use (e.g., claude, opencode, codex).",
@@ -55,7 +59,13 @@ def main(ctx: click.Context) -> None:
     default=1,
     help="Number of executor instances to spawn in parallel.",
 )
-def run(engine: str | None, executor: str, image: str | None, parallel: int) -> None:
+def run(
+    prompt: str | None,
+    engine: str | None,
+    executor: str,
+    image: str | None,
+    parallel: int,
+) -> None:
     """Run the wiggy loop."""
     resolved_engine = resolve_engine(engine)
     if resolved_engine is None:
@@ -72,7 +82,25 @@ def run(engine: str | None, executor: str, image: str | None, parallel: int) -> 
     console.print(f"[dim]Executor: {executor}, Parallel: {parallel}[/dim]")
     if image:
         console.print(f"[dim]Image override: {image}[/dim]")
-    console.print("[dim]Not implemented yet.[/dim]")
+    if prompt:
+        console.print(f"[dim]Prompt: {prompt}[/dim]")
+
+    # Create executor instance
+    exec_instance: Executor
+    if executor == "docker":
+        exec_instance = DockerExecutor(image_override=image)
+    else:
+        exec_instance = ShellExecutor()
+
+    try:
+        exec_instance.setup(resolved_engine, prompt)
+        for line in exec_instance.run():
+            console.print(line)
+    finally:
+        exec_instance.teardown()
+
+    if exec_instance.exit_code != 0:
+        raise SystemExit(exec_instance.exit_code or 1)
 
 
 @main.command()

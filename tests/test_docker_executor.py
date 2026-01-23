@@ -81,7 +81,7 @@ def test_setup_creates_container(mock_docker_client, test_engine) -> None:
 
     mock_docker_client.containers.create.assert_called_once()
     call_kwargs = mock_docker_client.containers.create.call_args.kwargs
-    assert call_kwargs["command"] == "test-cmd"
+    assert call_kwargs["command"] == ["test-cmd"]
     assert call_kwargs["working_dir"] == "/workspace"
     assert call_kwargs["tty"] is True
 

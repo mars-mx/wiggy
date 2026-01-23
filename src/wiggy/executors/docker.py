@@ -61,7 +61,14 @@ class DockerExecutor(Executor):
             env["ANTHROPIC_API_KEY"] = api_key
         return env
 
-    def setup(self, engine: Engine) -> None:
+    def _build_command(self, engine: Engine, prompt: str | None) -> list[str]:
+        """Build the full command list for the engine."""
+        command = [engine.cli_command, *engine.default_args]
+        if prompt:
+            command.append(prompt)
+        return command
+
+    def setup(self, engine: Engine, prompt: str | None = None) -> None:
         """Set up the Docker container for the given engine."""
         self._engine = engine
         client = self._get_client()
@@ -71,10 +78,11 @@ class DockerExecutor(Executor):
 
         volumes = self._get_volume_mounts(engine)
         environment = self._get_environment()
+        command = self._build_command(engine, prompt)
 
         self._container = client.containers.create(
             image=image,
-            command=engine.cli_command,
+            command=command,
             working_dir="/workspace",
             tty=True,
             stdin_open=True,
@@ -84,6 +92,7 @@ class DockerExecutor(Executor):
         )
 
         console.print(f"[dim]Created container: {self._container.short_id}[/dim]")
+        console.print(f"[dim]Command: {' '.join(command)}[/dim]")
 
     def run(self) -> Iterator[str]:
         """Run the engine in a Docker container.

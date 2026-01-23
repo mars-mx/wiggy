@@ -14,7 +14,7 @@ class ShellExecutor(Executor):
     def __init__(self) -> None:
         self._exit_code: int | None = None
 
-    def setup(self, engine: Engine) -> None:
+    def setup(self, engine: Engine, prompt: str | None = None) -> None:
         """Set up the shell environment for the given engine."""
         pass  # TODO: Shell environment setup
 

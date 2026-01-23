@@ -8,7 +8,8 @@ log() {
     echo "[entrypoint] $*"
 }
 
-# Copy credentials if mounted and not empty
+# Copy credentials if mounted and not empty.
+# We do this at runtime so we can modify the config at runtime without modifying the outside credentials.
 if [ -d "$READONLY_MOUNT" ] && [ "$(ls -A "$READONLY_MOUNT" 2>/dev/null)" ]; then
     log "Found mounted credentials at $READONLY_MOUNT"
     mkdir -p "$TARGET_DIR"

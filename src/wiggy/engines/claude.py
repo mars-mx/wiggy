@@ -8,4 +8,10 @@ CLAUDE = Engine(
     install_info="https://github.com/anthropics/claude-code",
     docker_image="ghcr.io/mars-mx/wiggy-claude:latest",
     credential_dir="~/.claude",
+    default_args=(
+        "--dangerously-skip-permissions",
+        "--print",
+        "--output-format",
+        "stream-json",
+    ),
 )
