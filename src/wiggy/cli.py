@@ -46,19 +46,32 @@ def main(ctx: click.Context) -> None:
     help="Executor to use.",
 )
 @click.option(
+    "--image", "-i",
+    help="Docker image to use (overrides engine default). Only for docker executor.",
+)
+@click.option(
     "--parallel", "-p",
     type=int,
     default=1,
     help="Number of executor instances to spawn in parallel.",
 )
-def run(engine: str | None, executor: str, parallel: int) -> None:
+def run(engine: str | None, executor: str, image: str | None, parallel: int) -> None:
     """Run the wiggy loop."""
     resolved_engine = resolve_engine(engine)
     if resolved_engine is None:
         raise SystemExit(1)
 
-    console.print(f"[bold green]Starting wiggy loop with {resolved_engine.name}...[/bold green]")
+    # Validate --image is only used with docker executor
+    if image and executor != "docker":
+        console.print("[red]--image can only be used with docker executor[/red]")
+        raise SystemExit(1)
+
+    console.print(
+        f"[bold green]Starting wiggy loop with {resolved_engine.name}...[/bold green]"
+    )
     console.print(f"[dim]Executor: {executor}, Parallel: {parallel}[/dim]")
+    if image:
+        console.print(f"[dim]Image override: {image}[/dim]")
     console.print("[dim]Not implemented yet.[/dim]")
 
 
