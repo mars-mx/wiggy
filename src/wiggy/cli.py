@@ -1,6 +1,7 @@
 """Command-line interface for wiggy."""
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from queue import Queue
 
 import click
@@ -11,6 +12,13 @@ from wiggy.config.preflight import run_all_checks
 from wiggy.console import console
 from wiggy.executors import DEFAULT_EXECUTOR, EXECUTORS, get_executors
 from wiggy.executors.base import Executor
+from wiggy.git import (
+    GitOperations,
+    NotAGitRepoError,
+    WorktreeError,
+    WorktreeInfo,
+    WorktreeManager,
+)
 from wiggy.monitor import Monitor
 from wiggy.parsers.messages import ParsedMessage
 from wiggy.runner import resolve_engine
@@ -69,6 +77,39 @@ def main(ctx: click.Context) -> None:
     "--model", "-m",
     help="Model to use (overrides engine default). Passed to engine CLI.",
 )
+@click.option(
+    "--worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Path to existing git worktree to use.",
+)
+@click.option(
+    "--worktree-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    envvar="WIGGY_WORKTREE_ROOT",
+    help="Root directory for auto-created worktrees.",
+)
+@click.option(
+    "--push/--no-push",
+    default=True,
+    help="Push to remote after execution (default: push).",
+)
+@click.option(
+    "--pr/--no-pr",
+    default=True,
+    help="Create PR after execution (default: create PR).",
+)
+@click.option(
+    "--remote",
+    default="origin",
+    envvar="WIGGY_REMOTE",
+    help="Git remote to push to (default: origin).",
+)
+@click.option(
+    "--keep-worktree",
+    is_flag=True,
+    default=False,
+    help="Keep worktree after execution (default: delete).",
+)
 def run(
     prompt: str | None,
     engine: str | None,
@@ -76,6 +117,12 @@ def run(
     image: str | None,
     parallel: int,
     model: str | None,
+    worktree: Path | None,
+    worktree_root: Path | None,
+    push: bool,
+    pr: bool,
+    remote: str,
+    keep_worktree: bool,
 ) -> None:
     """Run the wiggy loop."""
     resolved_engine = resolve_engine(engine)
@@ -86,6 +133,40 @@ def run(
     if image and executor != "docker":
         console.print("[red]--image can only be used with docker executor[/red]")
         raise SystemExit(1)
+
+    # Git worktree setup (only for docker executor)
+    worktree_infos: list[WorktreeInfo] = []
+    wt_manager: WorktreeManager | None = None
+
+    if executor == "docker":
+        try:
+            wt_manager = WorktreeManager()
+
+            if worktree:
+                # Use existing worktree (only one, shared by all parallel executors)
+                info = wt_manager.use_existing_worktree(worktree)
+                worktree_infos = [info] * parallel
+                console.print(f"[dim]Using existing worktree: {info.path}[/dim]")
+                console.print(f"[dim]Branch: {info.branch}[/dim]")
+            else:
+                # Create new worktree(s)
+                for i in range(1, parallel + 1):
+                    suffix = f"exec{i}" if parallel > 1 else ""
+                    info = wt_manager.create_worktree(
+                        worktree_root=worktree_root,
+                        suffix=suffix,
+                    )
+                    worktree_infos.append(info)
+                    console.print(f"[dim]Created worktree: {info.path}[/dim]")
+                    console.print(f"[dim]Branch: {info.branch}[/dim]")
+
+        except NotAGitRepoError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            console.print("[red]wiggy requires a git repository to run.[/red]")
+            raise SystemExit(1) from None
+        except WorktreeError as e:
+            console.print(f"[red]Worktree error: {e}[/red]")
+            raise SystemExit(1) from None
 
     console.print(
         f"[bold green]Starting wiggy loop with {resolved_engine.name}...[/bold green]"
@@ -98,13 +179,15 @@ def run(
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
-    # Create executor instances
+    # Create executor instances with worktree paths
+    worktree_paths = [info.path for info in worktree_infos] if worktree_infos else None
     executors = get_executors(
         name=executor,
         count=parallel,
         image=image,
         model=model,
         quiet=True,
+        worktree_paths=worktree_paths,
     )
 
     # Create monitor for real-time status display
@@ -144,6 +227,40 @@ def run(
 
     finally:
         monitor.stop()
+
+    # Post-execution git operations
+    if worktree_infos:
+        # Use unique worktree infos for post-execution (avoid duplicates if shared)
+        unique_infos = list({info.path: info for info in worktree_infos}.values())
+
+        for info in unique_infos:
+            git_ops = GitOperations(info)
+
+            if push and git_ops.has_commits():
+                console.print(f"[dim]Pushing {info.branch} to {remote}...[/dim]")
+                if git_ops.push_to_remote(remote):
+                    console.print(f"[green]Pushed {info.branch} to {remote}[/green]")
+                else:
+                    console.print(f"[yellow]Failed to push {info.branch}[/yellow]")
+
+            if pr and push and git_ops.has_commits():
+                console.print(f"[dim]Creating pull request for {info.branch}...[/dim]")
+                pr_url = git_ops.create_pull_request()
+                if pr_url:
+                    console.print(f"[green]PR created: {pr_url}[/green]")
+                else:
+                    console.print(
+                        "[yellow]Failed to create PR (is gh CLI installed?)[/yellow]"
+                    )
+
+        # Cleanup worktrees unless --keep-worktree
+        if not keep_worktree and wt_manager:
+            for info in unique_infos:
+                console.print(f"[dim]Removing worktree: {info.path}[/dim]")
+                try:
+                    wt_manager.remove_worktree(info, force=True)
+                except WorktreeError as e:
+                    console.print(f"[yellow]Failed to remove worktree: {e}[/yellow]")
 
     # Check for failures
     failed = [code for code in exit_codes if code != 0]

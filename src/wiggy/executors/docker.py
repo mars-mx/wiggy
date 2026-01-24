@@ -28,11 +28,13 @@ class DockerExecutor(Executor):
         model_override: str | None = None,
         executor_id: int = 1,
         quiet: bool = False,
+        worktree_path: Path | None = None,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
         self.executor_id = executor_id
         self.quiet = quiet
+        self._worktree_path = worktree_path
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -53,8 +55,17 @@ class DockerExecutor(Executor):
         return "ghcr.io/mars-mx/wiggy-base:latest"
 
     def _get_volume_mounts(self, engine: Engine) -> dict[str, dict[str, str]]:
-        """Build volume mount configuration from engine's credential_dir."""
+        """Build volume mount configuration from credential_dir and worktree."""
         volumes: dict[str, dict[str, str]] = {}
+
+        # Mount worktree as /workspace (read-write for git commits)
+        if self._worktree_path:
+            volumes[str(self._worktree_path)] = {
+                "bind": "/workspace",
+                "mode": "rw",
+            }
+
+        # Mount credentials (read-only)
         if engine.credential_dir:
             cred_path = Path(engine.credential_dir).expanduser()
             if cred_path.exists():
