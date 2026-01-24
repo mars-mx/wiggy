@@ -179,15 +179,14 @@ def run(
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
-    # Create executor instances with worktree paths
-    worktree_paths = [info.path for info in worktree_infos] if worktree_infos else None
+    # Create executor instances with worktree info
     executors = get_executors(
         name=executor,
         count=parallel,
         image=image,
         model=model,
         quiet=True,
-        worktree_paths=worktree_paths,
+        worktree_infos=worktree_infos if worktree_infos else None,
     )
 
     # Create monitor for real-time status display
@@ -228,44 +227,53 @@ def run(
     finally:
         monitor.stop()
 
+    # Check for failures
+    any_failed = any(code != 0 for code in exit_codes)
+
     # Post-execution git operations
     if worktree_infos:
         # Use unique worktree infos for post-execution (avoid duplicates if shared)
         unique_infos = list({info.path: info for info in worktree_infos}.values())
 
-        for info in unique_infos:
-            git_ops = GitOperations(info)
-
-            if push and git_ops.has_commits():
-                console.print(f"[dim]Pushing {info.branch} to {remote}...[/dim]")
-                if git_ops.push_to_remote(remote):
-                    console.print(f"[green]Pushed {info.branch} to {remote}[/green]")
-                else:
-                    console.print(f"[yellow]Failed to push {info.branch}[/yellow]")
-
-            if pr and push and git_ops.has_commits():
-                console.print(f"[dim]Creating pull request for {info.branch}...[/dim]")
-                pr_url = git_ops.create_pull_request()
-                if pr_url:
-                    console.print(f"[green]PR created: {pr_url}[/green]")
-                else:
-                    console.print(
-                        "[yellow]Failed to create PR (is gh CLI installed?)[/yellow]"
-                    )
-
-        # Cleanup worktrees unless --keep-worktree
-        if not keep_worktree and wt_manager:
+        # Skip push/PR if any executor failed
+        if any_failed:
+            console.print(
+                "[yellow]Executor failed - skipping push/PR, keeping worktree[/yellow]"
+            )
+        else:
             for info in unique_infos:
-                console.print(f"[dim]Removing worktree: {info.path}[/dim]")
-                try:
-                    wt_manager.remove_worktree(info, force=True)
-                except WorktreeError as e:
-                    console.print(f"[yellow]Failed to remove worktree: {e}[/yellow]")
+                git_ops = GitOperations(info)
 
-    # Check for failures
-    failed = [code for code in exit_codes if code != 0]
-    if failed:
-        raise SystemExit(failed[0] or 1)
+                if push and git_ops.has_commits():
+                    console.print(f"[dim]Pushing {info.branch} to {remote}...[/dim]")
+                    if git_ops.push_to_remote(remote):
+                        console.print(f"[green]Pushed {info.branch} to {remote}[/green]")
+                    else:
+                        console.print(f"[yellow]Failed to push {info.branch}[/yellow]")
+
+                if pr and push and git_ops.has_commits():
+                    console.print(f"[dim]Creating pull request for {info.branch}...[/dim]")
+                    pr_url = git_ops.create_pull_request()
+                    if pr_url:
+                        console.print(f"[green]PR created: {pr_url}[/green]")
+                    else:
+                        console.print(
+                            "[yellow]Failed to create PR (is gh CLI installed?)[/yellow]"
+                        )
+
+            # Cleanup worktrees unless --keep-worktree (only on success)
+            if not keep_worktree and wt_manager:
+                for info in unique_infos:
+                    console.print(f"[dim]Removing worktree: {info.path}[/dim]")
+                    try:
+                        wt_manager.remove_worktree(info, force=True)
+                    except WorktreeError as e:
+                        console.print(f"[yellow]Failed to remove worktree: {e}[/yellow]")
+
+    # Exit with failure code if any executor failed
+    if any_failed:
+        first_failure = next(code for code in exit_codes if code != 0)
+        raise SystemExit(first_failure or 1)
 
 
 @main.command()

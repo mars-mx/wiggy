@@ -1,8 +1,11 @@
 """Docker executor implementation."""
 
+from __future__ import annotations
+
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import docker
 from docker.models.containers import Container
@@ -12,6 +15,9 @@ from wiggy.engines.base import Engine
 from wiggy.executors.base import Executor
 from wiggy.parsers import get_parser_for_engine
 from wiggy.parsers.messages import ParsedMessage
+
+if TYPE_CHECKING:
+    from wiggy.git import WorktreeInfo
 
 # Mount point for credentials inside container
 CREDENTIALS_MOUNT = "/mnt/credentials"
@@ -28,13 +34,13 @@ class DockerExecutor(Executor):
         model_override: str | None = None,
         executor_id: int = 1,
         quiet: bool = False,
-        worktree_path: Path | None = None,
+        worktree_info: WorktreeInfo | None = None,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
         self.executor_id = executor_id
         self.quiet = quiet
-        self._worktree_path = worktree_path
+        self._worktree_info = worktree_info
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -59,11 +65,19 @@ class DockerExecutor(Executor):
         volumes: dict[str, dict[str, str]] = {}
 
         # Mount worktree as /workspace (read-write for git commits)
-        if self._worktree_path:
-            volumes[str(self._worktree_path)] = {
+        if self._worktree_info:
+            volumes[str(self._worktree_info.path)] = {
                 "bind": "/workspace",
                 "mode": "rw",
             }
+            # Mount the main repo's .git directory at the same host path
+            # This allows the worktree's .git file reference to work inside container
+            main_git_dir = self._worktree_info.main_repo / ".git"
+            if main_git_dir.exists():
+                volumes[str(main_git_dir)] = {
+                    "bind": str(main_git_dir),
+                    "mode": "rw",
+                }
 
         # Mount credentials (read-only)
         if engine.credential_dir:

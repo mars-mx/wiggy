@@ -3,11 +3,11 @@ FROM ghcr.io/mars-mx/wiggy-base:latest
 # Switch to wiggy user for Claude installation
 USER wiggy
 
-# Install Claude Code (installs to ~/.local/bin = /workspace/.local/bin)
+# Install Claude Code (installs to ~/.local/bin = /home/wiggy/.local/bin)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
-# Update PATH for wiggy user (home is /workspace)
-ENV PATH="/workspace/.local/bin:${PATH}"
+# Update PATH for wiggy user (home is /home/wiggy)
+ENV PATH="/home/wiggy/.local/bin:${PATH}"
 
 # Copy entrypoint script (root can write to /usr/local/bin)
 USER root
