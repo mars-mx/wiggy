@@ -1,0 +1,6 @@
+name: research
+description: |
+  Research approaches, find examples, and gather information
+  to inform implementation decisions.
+tools:
+  - "*"

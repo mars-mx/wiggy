@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "docker>=7.0",
+    "pyyaml>=6.0",
     "rich>=13.0",
 ]
 
@@ -34,6 +35,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "types-docker>=7.0",
+    "types-PyYAML>=6.0",
 ]
 
 [project.scripts]
@@ -41,6 +43,16 @@ wiggy = "wiggy.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/wiggy"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/wiggy/tasks/default" = "wiggy/tasks/default"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/wiggy",
+    "src/wiggy/tasks/default/**/*.yaml",
+    "src/wiggy/tasks/default/**/*.md",
+]
 
 [tool.ruff]
 src = ["src"]

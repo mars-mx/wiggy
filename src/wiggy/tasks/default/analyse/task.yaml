@@ -1,0 +1,6 @@
+name: analyse
+description: |
+  Analyze the codebase to understand structure, identify relevant files,
+  and document findings for subsequent tasks.
+tools:
+  - "*"

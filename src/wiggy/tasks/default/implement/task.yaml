@@ -1,0 +1,6 @@
+name: implement
+description: |
+  Implement the requested feature or fix based on the provided
+  requirements and any prior analysis.
+tools:
+  - "*"

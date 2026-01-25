@@ -1,0 +1,6 @@
+name: test
+description: |
+  Write and run tests to verify the implementation works correctly
+  and handles edge cases.
+tools:
+  - "*"

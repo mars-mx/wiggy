@@ -14,7 +14,8 @@ from wiggy.console import console
 from wiggy.engines.base import Engine
 from wiggy.executors.base import Executor
 from wiggy.parsers import get_parser_for_engine
-from wiggy.parsers.messages import ParsedMessage
+from wiggy.parsers.base import Parser
+from wiggy.parsers.messages import ParsedMessage, SessionSummary
 
 if TYPE_CHECKING:
     from wiggy.git import WorktreeInfo
@@ -45,6 +46,7 @@ class DockerExecutor(Executor):
         self._container: Container | None = None
         self._engine: Engine | None = None
         self._exit_code: int | None = None
+        self._parser: Parser | None = None
 
     def _get_client(self) -> docker.DockerClient:
         """Get or create Docker client."""
@@ -159,7 +161,7 @@ class DockerExecutor(Executor):
             raise RuntimeError("setup() must be called before run()")
 
         # Get parser for this engine
-        parser = get_parser_for_engine(self._engine.name)
+        self._parser = get_parser_for_engine(self._engine.name)
 
         self._container.start()
 
@@ -170,12 +172,12 @@ class DockerExecutor(Executor):
             while "\n" in buffer:
                 line, buffer = buffer.split("\n", 1)
                 self._write_log(line)
-                yield parser.parse_line(line)
+                yield self._parser.parse_line(line)
 
         # Yield any remaining content
         if buffer:
             self._write_log(buffer)
-            yield parser.parse_line(buffer)
+            yield self._parser.parse_line(buffer)
 
         # Wait for container to finish and get exit code
         result = self._container.wait()
@@ -203,3 +205,10 @@ class DockerExecutor(Executor):
     def exit_code(self) -> int | None:
         """Return the exit code after run() completes, or None if still running."""
         return self._exit_code
+
+    @property
+    def summary(self) -> SessionSummary | None:
+        """Return the session summary after run() completes, or None if unavailable."""
+        if self._parser is None:
+            return None
+        return self._parser.get_summary()

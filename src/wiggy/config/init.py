@@ -21,3 +21,13 @@ def ensure_wiggy_dir() -> None:
     # Create .gitignore if it doesn't exist
     if not gitignore_path.exists():
         gitignore_path.write_text("logs/\n")
+
+
+def ensure_home_wiggy_dir() -> Path:
+    """Create ~/.wiggy directory if it doesn't exist.
+
+    Returns the path to the home wiggy directory.
+    """
+    home_wiggy = Path.home() / ".wiggy"
+    home_wiggy.mkdir(parents=True, exist_ok=True)
+    return home_wiggy

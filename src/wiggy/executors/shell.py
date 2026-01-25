@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 from wiggy.engines.base import Engine
 from wiggy.executors.base import Executor
-from wiggy.parsers.messages import ParsedMessage
+from wiggy.parsers.messages import ParsedMessage, SessionSummary
 
 
 class ShellExecutor(Executor):
@@ -44,3 +44,8 @@ class ShellExecutor(Executor):
     def exit_code(self) -> int | None:
         """Return the exit code after run() completes, or None if still running."""
         return self._exit_code
+
+    @property
+    def summary(self) -> SessionSummary | None:
+        """Return the session summary after run() completes, or None if unavailable."""
+        return None  # TODO: Implement when shell execution is implemented

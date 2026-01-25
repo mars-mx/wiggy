@@ -1,13 +1,13 @@
 """Base executor class."""
 
+import secrets
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
 from wiggy.engines.base import Engine
-from wiggy.parsers.messages import ParsedMessage
+from wiggy.parsers.messages import ParsedMessage, SessionSummary
 
 
 class Executor(ABC):
@@ -17,18 +17,26 @@ class Executor(ABC):
     executor_id: int = 1
     quiet: bool = False
     _log_file: TextIO | None = None
-    _session_id: str | None = None
+    _task_id: str | None = None
 
-    def _generate_session_id(self) -> str:
-        """Generate a session ID with format: YYYYMMDD_HHMMSS_exec{N}."""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return f"{timestamp}_exec{self.executor_id}"
+    def set_task_id(self, task_id: str) -> None:
+        """Set the task_id for this executor (used for log file naming)."""
+        self._task_id = task_id
+
+    @property
+    def task_id(self) -> str | None:
+        """Return the task_id for this executor."""
+        return self._task_id
+
+    def _generate_task_id(self) -> str:
+        """Generate a task ID (8 hex chars)."""
+        return secrets.token_hex(4)
 
     def _open_log(self) -> None:
-        """Open the log file for this session."""
-        if self._session_id is None:
-            self._session_id = self._generate_session_id()
-        log_path = Path.cwd() / ".wiggy" / "logs" / f"{self._session_id}.log"
+        """Open the log file for this task."""
+        if self._task_id is None:
+            self._task_id = self._generate_task_id()
+        log_path = Path.cwd() / ".wiggy" / "logs" / f"{self._task_id}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_file = open(log_path, "w", encoding="utf-8")
 
@@ -66,4 +74,10 @@ class Executor(ABC):
     @abstractmethod
     def exit_code(self) -> int | None:
         """Return the exit code after run() completes, or None if still running."""
+        ...
+
+    @property
+    @abstractmethod
+    def summary(self) -> SessionSummary | None:
+        """Return the session summary after run() completes, or None if unavailable."""
         ...
