@@ -10,6 +10,7 @@ from wiggy.history import (
     TaskHistoryRepository,
     TaskLog,
     TaskNotFoundError,
+    TaskResult,
     cleanup_old_tasks,
 )
 
@@ -352,3 +353,192 @@ class TestSchemaMigration:
         repo2 = TaskHistoryRepository(db_path=temp_db)
         # Should not error and task should still exist
         assert repo2.get_by_task_id("test1") is not None
+
+    def test_migration_v1_to_v2(self, tmp_path: Path) -> None:
+        """Test migrating a v1 database to v2 adds the task_result table."""
+        import sqlite3
+
+        from wiggy.history.schema import SCHEMA_SQL, get_schema_version
+
+        db_path = tmp_path / "migrate.db"
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+
+        # Build a v1 database manually (SCHEMA_SQL now includes task_result,
+        # so we strip that table and set version=1)
+        v1_sql = SCHEMA_SQL.split("-- Task execution results")[0]
+        v1_sql += """
+        -- Multiple commits per task
+        CREATE TABLE IF NOT EXISTS task_refs (
+            task_id TEXT NOT NULL,
+            commit_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (task_id, commit_hash),
+            FOREIGN KEY (task_id) REFERENCES task_log(task_id) ON DELETE CASCADE
+        );
+        """
+        conn.executescript(v1_sql)
+        conn.execute("INSERT INTO schema_version VALUES (1)")
+        conn.commit()
+
+        assert get_schema_version(conn) == 1
+        conn.close()
+
+        # Open via repository — triggers migration
+        TaskHistoryRepository(db_path=db_path)
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='task_result'"
+        )
+        assert cursor.fetchone() is not None
+        assert get_schema_version(conn) == 2
+        conn.close()
+
+    def test_fresh_install_has_task_result(self, tmp_path: Path) -> None:
+        """Test that a fresh database has both task_log and task_result tables."""
+        import sqlite3
+
+        db_path = tmp_path / "fresh.db"
+        TaskHistoryRepository(db_path=db_path)
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+        )
+        tables = [row[0] for row in cursor.fetchall()]
+        conn.close()
+
+        assert "task_log" in tables
+        assert "task_result" in tables
+        assert "task_refs" in tables
+
+
+class TestTaskResult:
+    """Tests for TaskResult storage and retrieval."""
+
+    def test_create_result(self, repo: TaskHistoryRepository) -> None:
+        """Insert a result, verify it can be retrieved."""
+        task = make_task()
+        repo.create(task)
+
+        repo.create_result(
+            "abcd1234",
+            result_text="All tests passed.",
+            key_files=["src/main.py"],
+            tags=["test", "pass"],
+        )
+
+        result = repo.get_result_by_task_id("abcd1234")
+        assert result is not None
+        assert result.task_id == "abcd1234"
+        assert result.result_text == "All tests passed."
+        assert result.key_files == ("src/main.py",)
+        assert result.tags == ("test", "pass")
+        assert result.has_summary is False
+        assert result.summary_text is None
+        assert result.created_at  # non-empty
+
+    def test_create_result_upsert(self, repo: TaskHistoryRepository) -> None:
+        """Insert twice for same task_id, verify second overwrites first."""
+        task = make_task()
+        repo.create(task)
+
+        repo.create_result("abcd1234", result_text="First result")
+        repo.create_result("abcd1234", result_text="Second result", tags=["updated"])
+
+        result = repo.get_result_by_task_id("abcd1234")
+        assert result is not None
+        assert result.result_text == "Second result"
+        assert result.tags == ("updated",)
+
+    def test_update_summary(self, repo: TaskHistoryRepository) -> None:
+        """Create result, update summary, verify has_summary flips to True."""
+        task = make_task()
+        repo.create(task)
+        repo.create_result("abcd1234", result_text="Full result text here.")
+
+        repo.update_summary("abcd1234", "TLDR: tests passed")
+
+        result = repo.get_result_by_task_id("abcd1234")
+        assert result is not None
+        assert result.has_summary is True
+        assert result.summary_text == "TLDR: tests passed"
+
+    def test_get_result_by_task_id(self, repo: TaskHistoryRepository) -> None:
+        """Retrieve by task_id, verify all fields including JSON deserialization."""
+        task = make_task()
+        repo.create(task)
+        repo.create_result(
+            "abcd1234",
+            result_text="Implemented feature X",
+            key_files=["src/feature.py", "tests/test_feature.py"],
+            tags=["feature", "implementation"],
+        )
+
+        result = repo.get_result_by_task_id("abcd1234")
+        assert result is not None
+        assert isinstance(result, TaskResult)
+        assert result.task_id == "abcd1234"
+        assert result.result_text == "Implemented feature X"
+        assert result.key_files == ("src/feature.py", "tests/test_feature.py")
+        assert result.tags == ("feature", "implementation")
+        assert result.has_summary is False
+        assert result.summary_text is None
+
+    def test_get_result_by_task_name(self, repo: TaskHistoryRepository) -> None:
+        """Create task_log + task_result, look up by task_name + process_id."""
+        task = make_task(task_id="task0001", process_id="proc1111", task_name="lint")
+        repo.create(task)
+        repo.create_result("task0001", result_text="Lint passed", tags=["lint"])
+
+        result = repo.get_result_by_task_name("lint", "proc1111")
+        assert result is not None
+        assert result.task_id == "task0001"
+        assert result.result_text == "Lint passed"
+
+    def test_get_result_by_task_name_fallback(
+        self, repo: TaskHistoryRepository
+    ) -> None:
+        """Verify global fallback when no process match."""
+        # Create a task in a different process
+        task = make_task(
+            task_id="task0001", process_id="proc_old", task_name="build"
+        )
+        repo.create(task)
+        repo.create_result("task0001", result_text="Build succeeded")
+
+        # Look up with a different process_id — should fall back to global
+        result = repo.get_result_by_task_name("build", "proc_new")
+        assert result is not None
+        assert result.task_id == "task0001"
+        assert result.result_text == "Build succeeded"
+
+    def test_get_result_not_found(self, repo: TaskHistoryRepository) -> None:
+        """Verify None returned for non-existent results."""
+        result = repo.get_result_by_task_id("nonexistent")
+        assert result is None
+
+        result = repo.get_result_by_task_name("nonexistent", "proc0000")
+        assert result is None
+
+    def test_create_result_empty_lists(self, repo: TaskHistoryRepository) -> None:
+        """Test creating a result with no key_files or tags."""
+        task = make_task()
+        repo.create(task)
+        repo.create_result("abcd1234", result_text="Minimal result")
+
+        result = repo.get_result_by_task_id("abcd1234")
+        assert result is not None
+        assert result.key_files == ()
+        assert result.tags == ()
+
+    def test_cascade_delete(self, repo: TaskHistoryRepository) -> None:
+        """Test that deleting a task_log cascades to task_result."""
+        task = make_task()
+        repo.create(task)
+        repo.create_result("abcd1234", result_text="Will be deleted")
+
+        repo.delete_task("abcd1234")
+
+        assert repo.get_result_by_task_id("abcd1234") is None

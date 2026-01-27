@@ -2,7 +2,7 @@
 
 from sqlite3 import Connection
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 -- Schema version for migrations
@@ -57,6 +57,17 @@ CREATE INDEX IF NOT EXISTS idx_parent_id ON task_log(parent_id)
     WHERE parent_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_created_at ON task_log(created_at DESC);
 
+-- Task execution results (MCP context-passing)
+CREATE TABLE IF NOT EXISTS task_result (
+    task_id TEXT PRIMARY KEY REFERENCES task_log(task_id) ON DELETE CASCADE,
+    result_text TEXT NOT NULL,
+    summary_text TEXT,
+    key_files TEXT,
+    tags TEXT,
+    has_summary INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
 -- Multiple commits per task
 CREATE TABLE IF NOT EXISTS task_refs (
     task_id TEXT NOT NULL,
@@ -67,10 +78,19 @@ CREATE TABLE IF NOT EXISTS task_refs (
 );
 """
 
-# Future migrations: key is "from_version", value is SQL to apply
+# Migrations: key is "from_version", value is SQL to apply
 MIGRATIONS: dict[int, str] = {
-    # Example: 1 -> 2
-    # 1: "ALTER TABLE task_log ADD COLUMN new_field TEXT;"
+    1: """
+    CREATE TABLE IF NOT EXISTS task_result (
+        task_id TEXT PRIMARY KEY REFERENCES task_log(task_id) ON DELETE CASCADE,
+        result_text TEXT NOT NULL,
+        summary_text TEXT,
+        key_files TEXT,
+        tags TEXT,
+        has_summary INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    """,
 }
 
 

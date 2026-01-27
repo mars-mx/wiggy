@@ -1,5 +1,6 @@
 """Task history data models."""
 
+import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from sqlite3 import Row
@@ -107,4 +108,36 @@ class TaskLog:
             exit_code=row["exit_code"],
             error_message=row["error_message"],
             parent_id=row["parent_id"],
+        )
+
+
+@dataclass(frozen=True)
+class TaskResult:
+    """Immutable record of a task execution result."""
+
+    task_id: str  # FK → task_log.task_id
+    result_text: str  # Full raw result
+    key_files: tuple[str, ...]  # Relevant file paths
+    tags: tuple[str, ...]  # Categorization tags
+    has_summary: bool  # Whether summary_text is populated
+    created_at: str  # ISO8601 UTC
+
+    summary_text: str | None = None  # Haiku-compressed TLDR
+
+    @classmethod
+    def from_row(cls, row: Row) -> Self:
+        """Create a TaskResult from a database row.
+
+        key_files and tags are stored as JSON arrays in the database.
+        """
+        key_files_raw = row["key_files"]
+        tags_raw = row["tags"]
+        return cls(
+            task_id=row["task_id"],
+            result_text=row["result_text"],
+            key_files=tuple(json.loads(key_files_raw)) if key_files_raw else (),
+            tags=tuple(json.loads(tags_raw)) if tags_raw else (),
+            has_summary=bool(row["has_summary"]),
+            created_at=row["created_at"],
+            summary_text=row["summary_text"],
         )

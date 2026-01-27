@@ -1,10 +1,11 @@
 """Task history repository for database operations."""
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wiggy.history.models import TaskLog
+from wiggy.history.models import TaskLog, TaskResult
 from wiggy.history.schema import migrate_if_needed
 
 
@@ -266,6 +267,100 @@ class TaskHistoryRepository:
             raise TaskNotFoundError("branch", branch)
         return task
 
+    # Task result operations
+
+    def create_result(
+        self,
+        task_id: str,
+        result_text: str,
+        key_files: list[str] | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Insert a task result. Uses UPSERT to allow overwriting.
+
+        key_files and tags are JSON-serialized for storage.
+        created_at is set to now (UTC).
+        """
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO task_result (
+                    task_id, result_text, key_files, tags,
+                    has_summary, created_at
+                ) VALUES (?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    task_id,
+                    result_text,
+                    json.dumps(key_files or []),
+                    json.dumps(tags or []),
+                    created_at,
+                ),
+            )
+            conn.commit()
+
+    def update_summary(self, task_id: str, summary_text: str) -> None:
+        """Store the compressed summary and set has_summary = 1."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE task_result
+                SET summary_text = ?, has_summary = 1
+                WHERE task_id = ?
+                """,
+                (summary_text, task_id),
+            )
+            conn.commit()
+
+    def get_result_by_task_id(self, task_id: str) -> TaskResult | None:
+        """Get result by task_id directly."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM task_result WHERE task_id = ?", (task_id,)
+            )
+            row = cursor.fetchone()
+            return TaskResult.from_row(row) if row else None
+
+    def get_result_by_task_name(
+        self, task_name: str, process_id: str
+    ) -> TaskResult | None:
+        """Get most recent result for a task name within a process.
+
+        Joins task_result with task_log to resolve task_name → task_id.
+        Falls back to most recent result globally (without process_id filter)
+        if no match found within the process.
+        """
+        with self._connect() as conn:
+            # Try within process first
+            cursor = conn.execute(
+                """
+                SELECT tr.*
+                FROM task_result tr
+                JOIN task_log tl ON tr.task_id = tl.task_id
+                WHERE tl.task_name = ? AND tl.process_id = ?
+                ORDER BY tr.created_at DESC LIMIT 1
+                """,
+                (task_name, process_id),
+            )
+            row = cursor.fetchone()
+            if row:
+                return TaskResult.from_row(row)
+
+            # Fallback: most recent globally
+            cursor = conn.execute(
+                """
+                SELECT tr.*
+                FROM task_result tr
+                JOIN task_log tl ON tr.task_id = tl.task_id
+                WHERE tl.task_name = ?
+                ORDER BY tr.created_at DESC LIMIT 1
+                """,
+                (task_name,),
+            )
+            row = cursor.fetchone()
+            return TaskResult.from_row(row) if row else None
+
     # Cleanup operations
 
     def get_tasks_older_than(self, days: int) -> list[TaskLog]:
@@ -287,8 +382,6 @@ class TaskHistoryRepository:
         """Delete a task and its refs. Returns True if deleted."""
         with self._connect() as conn:
             # Refs are deleted by ON DELETE CASCADE
-            cursor = conn.execute(
-                "DELETE FROM task_log WHERE task_id = ?", (task_id,)
-            )
+            cursor = conn.execute("DELETE FROM task_log WHERE task_id = ?", (task_id,))
             conn.commit()
             return cursor.rowcount > 0
