@@ -14,6 +14,7 @@ class Engine:
     docker_image: str | None = None
     credential_dir: str | None = None  # Path to credentials (e.g., "~/.claude")
     default_args: tuple[str, ...] = ()  # Default CLI arguments for this engine
+    mcp_support: bool = False  # Whether engine supports MCP config injection
 
     def is_installed(self) -> bool:
         """Check if this engine's CLI command is available in PATH."""

@@ -30,6 +30,7 @@ def get_executor(
     allowed_tools: list[str] | None = None,
     mount_cwd: bool = False,
     global_tasks_rw: bool = False,
+    mcp_port: int | None = None,
 ) -> Executor:
     """Get an executor instance by name. Defaults to docker.
 
@@ -44,6 +45,7 @@ def get_executor(
         allowed_tools: List of tools to allow (for --allowedTools flag).
         mount_cwd: Mount current working directory as /workspace.
         global_tasks_rw: Mount global tasks directory as read-write.
+        mcp_port: Port of the host-side MCP server (enables MCP integration).
     """
     executor_name = name or DEFAULT_EXECUTOR
     if executor_name not in EXECUTORS:
@@ -60,6 +62,7 @@ def get_executor(
             allowed_tools=allowed_tools,
             mount_cwd=mount_cwd,
             global_tasks_rw=global_tasks_rw,
+            mcp_port=mcp_port,
         )
 
     return ShellExecutor(model_override=model, executor_id=executor_id, quiet=quiet)
@@ -76,6 +79,7 @@ def get_executors(
     allowed_tools: list[str] | None = None,
     mount_cwd: bool = False,
     global_tasks_rw: bool = False,
+    mcp_port: int | None = None,
 ) -> list[Executor]:
     """Get multiple executor instances of the same type for parallel execution.
 
@@ -91,6 +95,7 @@ def get_executors(
         allowed_tools: List of tools to allow (for --allowedTools flag).
         mount_cwd: Mount current working directory as /workspace.
         global_tasks_rw: Mount global tasks directory as read-write.
+        mcp_port: Port of the host-side MCP server (enables MCP integration).
 
     Returns:
         List of executor instances with sequential executor_ids (1, 2, 3...).
@@ -112,6 +117,7 @@ def get_executors(
             allowed_tools=allowed_tools,
             mount_cwd=mount_cwd,
             global_tasks_rw=global_tasks_rw,
+            mcp_port=mcp_port,
         )
         for i in range(1, count + 1)
     ]

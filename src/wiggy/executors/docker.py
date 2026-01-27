@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from pathlib import Path
@@ -23,6 +24,20 @@ if TYPE_CHECKING:
 # Mount point for credentials inside container
 CREDENTIALS_MOUNT = "/mnt/credentials"
 
+# Mount point for MCP config inside container
+MCP_CONFIG_CONTAINER_PATH = "/home/wiggy/.wiggy/mcp.json"
+
+# MCP config template with env var placeholders for client-side expansion
+MCP_CONFIG_TEMPLATE = {
+    "mcpServers": {
+        "wiggy": {
+            "type": "http",
+            "url": "http://host.docker.internal:${WIGGY_MCP_PORT}/mcp",
+            "headers": {"X-Wiggy-Task-ID": "${WIGGY_TASK_ID}"},
+        }
+    }
+}
+
 
 class DockerExecutor(Executor):
     """Executor that runs engines in Docker containers."""
@@ -40,6 +55,7 @@ class DockerExecutor(Executor):
         allowed_tools: list[str] | None = None,
         mount_cwd: bool = False,
         global_tasks_rw: bool = False,
+        mcp_port: int | None = None,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
@@ -50,6 +66,8 @@ class DockerExecutor(Executor):
         self._allowed_tools = allowed_tools
         self._mount_cwd = mount_cwd
         self._global_tasks_rw = global_tasks_rw
+        self._mcp_port = mcp_port
+        self._mcp_config_path: Path | None = None
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -69,6 +87,21 @@ class DockerExecutor(Executor):
         if engine.docker_image:
             return engine.docker_image
         return "ghcr.io/mars-mx/wiggy-base:latest"
+
+    def _write_mcp_config(self) -> Path:
+        """Write the MCP config template to .wiggy/mcp.json.
+
+        Returns the host path to the config file.
+        The file uses ${WIGGY_MCP_PORT} and ${WIGGY_TASK_ID} for env var
+        expansion by the MCP client at runtime.
+        """
+        if self._mcp_config_path is not None:
+            return self._mcp_config_path
+
+        config_path = Path.cwd() / ".wiggy" / "mcp.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(MCP_CONFIG_TEMPLATE, indent=4) + "\n")
+        return config_path
 
     def _get_volume_mounts(self, engine: Engine) -> dict[str, dict[str, str]]:
         """Build volume mount configuration from credential_dir and worktree."""
@@ -112,6 +145,14 @@ class DockerExecutor(Executor):
                     "bind": CREDENTIALS_MOUNT,
                     "mode": "ro",
                 }
+
+        # Mount MCP config (if MCP enabled)
+        if self._mcp_config_path:
+            volumes[str(self._mcp_config_path)] = {
+                "bind": MCP_CONFIG_CONTAINER_PATH,
+                "mode": "ro",
+            }
+
         return volumes
 
     def _get_environment(self) -> dict[str, str]:
@@ -120,6 +161,10 @@ class DockerExecutor(Executor):
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if api_key:
             env["ANTHROPIC_API_KEY"] = api_key
+        if self._mcp_port is not None:
+            env["WIGGY_MCP_PORT"] = str(self._mcp_port)
+        if self._task_id:
+            env["WIGGY_TASK_ID"] = self._task_id
         return env
 
     def _build_command(self, engine: Engine, prompt: str | None) -> list[str]:
@@ -130,6 +175,9 @@ class DockerExecutor(Executor):
         # Add allowed tools if specified (not "*" which means all)
         if self._allowed_tools is not None and self._allowed_tools != ["*"]:
             command.extend(["--allowedTools", ",".join(self._allowed_tools)])
+        # Inject --mcp-config when MCP is enabled and engine supports it
+        if self._mcp_port is not None and engine.mcp_support:
+            command.extend(["--mcp-config", MCP_CONFIG_CONTAINER_PATH])
         # Add extra args (e.g., --append-system-prompt)
         command.extend(self._extra_args)
         command.extend(engine.default_args)
@@ -157,6 +205,10 @@ class DockerExecutor(Executor):
 
         image = self._resolve_image(engine)
         self._pull_image(client, image)
+
+        # Write MCP config if MCP enabled
+        if self._mcp_port is not None:
+            self._mcp_config_path = self._write_mcp_config()
 
         volumes = self._get_volume_mounts(engine)
         environment = self._get_environment()

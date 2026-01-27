@@ -1,11 +1,16 @@
 """Tests for Docker executor."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from wiggy.engines.base import Engine
-from wiggy.executors.docker import DockerExecutor
+from wiggy.executors.docker import (
+    MCP_CONFIG_CONTAINER_PATH,
+    MCP_CONFIG_TEMPLATE,
+    DockerExecutor,
+)
 
 
 @pytest.fixture
@@ -27,6 +32,18 @@ def test_engine():
         cli_command="test-cmd",
         install_info="https://example.com",
         docker_image="test/image:latest",
+    )
+
+
+@pytest.fixture
+def test_engine_with_mcp():
+    """Create a test engine with MCP support."""
+    return Engine(
+        name="MCP Engine",
+        cli_command="mcp-cmd",
+        install_info="https://example.com",
+        docker_image="test/image:latest",
+        mcp_support=True,
     )
 
 
@@ -104,3 +121,128 @@ def test_teardown_removes_container(mock_docker_client, test_engine) -> None:
     executor.teardown()
 
     mock_container.remove.assert_called_once_with(force=True)
+
+
+# --- MCP integration tests ---
+
+
+def test_mcp_config_written(mock_docker_client, test_engine_with_mcp, tmp_path) -> None:
+    """Test MCP config file is written when mcp_port is set."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    with patch("wiggy.executors.docker.Path.cwd", return_value=tmp_path):
+        executor.setup(test_engine_with_mcp)
+
+    config_path = tmp_path / ".wiggy" / "mcp.json"
+    assert config_path.exists()
+
+
+def test_mcp_config_not_written_when_no_port(
+    mock_docker_client, test_engine, tmp_path
+) -> None:
+    """Test no MCP config file is written when mcp_port is not set."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor()
+    with patch("wiggy.executors.docker.Path.cwd", return_value=tmp_path):
+        executor.setup(test_engine)
+
+    config_path = tmp_path / ".wiggy" / "mcp.json"
+    assert not config_path.exists()
+
+
+def test_mcp_environment_variables(mock_docker_client, test_engine_with_mcp) -> None:
+    """Test WIGGY_MCP_PORT and WIGGY_TASK_ID are in the container environment."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    executor.set_task_id("abcd1234")
+    executor.setup(test_engine_with_mcp)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    env = call_kwargs["environment"]
+    assert env["WIGGY_MCP_PORT"] == "12345"
+    assert env["WIGGY_TASK_ID"] == "abcd1234"
+
+
+def test_mcp_config_mounted(
+    mock_docker_client, test_engine_with_mcp, tmp_path
+) -> None:
+    """Test the MCP config file is in the volume mounts at the correct container path."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    with patch("wiggy.executors.docker.Path.cwd", return_value=tmp_path):
+        executor.setup(test_engine_with_mcp)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    volumes = call_kwargs["volumes"]
+    config_host_path = str(tmp_path / ".wiggy" / "mcp.json")
+    assert config_host_path in volumes
+    assert volumes[config_host_path]["bind"] == MCP_CONFIG_CONTAINER_PATH
+    assert volumes[config_host_path]["mode"] == "ro"
+
+
+def test_mcp_config_flag_injected(
+    mock_docker_client, test_engine_with_mcp
+) -> None:
+    """Test --mcp-config flag is in the command when mcp_port is set and engine has mcp_support."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    executor.setup(test_engine_with_mcp)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    command = call_kwargs["command"]
+    assert "--mcp-config" in command
+    mcp_idx = command.index("--mcp-config")
+    assert command[mcp_idx + 1] == MCP_CONFIG_CONTAINER_PATH
+
+
+def test_mcp_config_flag_not_injected_without_support(
+    mock_docker_client, test_engine
+) -> None:
+    """Test --mcp-config is NOT in the command when engine.mcp_support is False."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    executor.setup(test_engine)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    command = call_kwargs["command"]
+    assert "--mcp-config" not in command
+
+
+def test_mcp_config_content(
+    mock_docker_client, test_engine_with_mcp, tmp_path
+) -> None:
+    """Test the written config file content matches the MCP template with placeholders."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(mcp_port=12345)
+    with patch("wiggy.executors.docker.Path.cwd", return_value=tmp_path):
+        executor.setup(test_engine_with_mcp)
+
+    config_path = tmp_path / ".wiggy" / "mcp.json"
+    content = json.loads(config_path.read_text())
+
+    assert content == MCP_CONFIG_TEMPLATE
+    # Verify the placeholders are present as literal strings
+    wiggy_server = content["mcpServers"]["wiggy"]
+    assert "${WIGGY_MCP_PORT}" in wiggy_server["url"]
+    assert wiggy_server["headers"]["X-Wiggy-Task-ID"] == "${WIGGY_TASK_ID}"
