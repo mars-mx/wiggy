@@ -2,6 +2,8 @@
 
 A highly opinionated Ralph Wiggum loop AI software development CLI for parallel task execution.
 
+Wiggy is a cracked software development intern that never rests, never sleeps, and never gets sick. The vision is to use him like an SD intern — point him at tasks, let him grind, and review his work when he's done.
+
 ## Vision
 
 Wiggy enables working on multiple tasks in parallel by orchestrating AI coding engines. For each task, Wiggy will:
@@ -69,6 +71,16 @@ wiggy run [OPTIONS] [PROMPT]
 | `--image` | `-i` | Docker image override (docker executor only) |
 | `--parallel` | `-p` | Number of parallel executor instances (default: 1) |
 | `--model` | `-m` | Model override passed to engine CLI |
+| `--worktree` | | Path to existing git worktree to use |
+| `--worktree-root` | | Root directory for auto-created worktrees |
+| `--push/--no-push` | | Push to remote after execution (default: push) |
+| `--pr/--no-pr` | | Create PR after execution (default: create PR) |
+| `--remote` | | Git remote to push to (default: `origin`) |
+| `--keep-worktree` | | Keep worktree after execution |
+| `--resume-task` | | Resume a previous run by task_id (8 hex chars) |
+| `--resume-branch` | | Resume a previous run by branch name |
+| `--resume-session` | | Resume a previous run by engine session_id |
+| `--continue-from` | | Create a child task linked to a parent task_id |
 
 **Examples:**
 
@@ -84,6 +96,12 @@ wiggy run -p 5 -i my-custom-image:latest "Fix all linting errors"
 
 # Use shell executor instead of Docker
 wiggy run -x shell "Update documentation"
+
+# Resume a previous task
+wiggy run --resume-task abc12345
+
+# Chain a follow-up task from a previous one
+wiggy run --continue-from abc12345 "Now add tests for the feature"
 ```
 
 ### `wiggy preflight`
@@ -97,6 +115,47 @@ wiggy preflight
 **Checks performed:**
 - Docker daemon connectivity and version
 - Installed AI engines detection
+
+### `wiggy init`
+
+Initialize wiggy configuration interactively.
+
+```bash
+wiggy init            # Local project config (.wiggy/config.yaml)
+wiggy init --global   # Global user config (~/.wiggy/config.yaml)
+wiggy init --show     # Show current resolved config
+```
+
+### `wiggy history`
+
+Show recent task execution history.
+
+```bash
+wiggy history          # Show last 10 tasks
+wiggy history -n 25    # Show last 25 tasks
+```
+
+### `wiggy cleanup`
+
+Clean up old task history records and log files.
+
+```bash
+wiggy cleanup                  # Delete tasks older than 30 days
+wiggy cleanup --older-than 7   # Delete tasks older than 7 days
+wiggy cleanup --dry-run        # Preview what would be deleted
+```
+
+### `wiggy task`
+
+Manage and run named tasks.
+
+```bash
+wiggy task list                              # List available tasks
+wiggy task run implement                     # Run a task by name
+wiggy task run implement -e claude -p "..."  # With engine and prompt
+wiggy task create                            # Create a new task via AI
+wiggy task create --local                    # Create in local project tasks
+```
 
 ### `wiggy --version`
 
@@ -135,6 +194,70 @@ Runs engines in isolated Docker containers with:
 
 Runs engines directly in a subprocess (work in progress).
 
+## Tasks
+
+Wiggy includes a named task system for common workflows. Each task is a YAML spec with a prompt template.
+
+**Built-in tasks:**
+
+| Task | Description |
+|------|-------------|
+| `analyse` | Analyse code or requirements |
+| `create-task` | Create a new task definition via AI |
+| `implement` | Implement a feature or change |
+| `research` | Research a topic or codebase |
+| `review` | Review code |
+| `test` | Write or run tests |
+
+Tasks are discovered from two locations:
+- **Global:** `~/.wiggy/tasks/`
+- **Local:** `.wiggy/tasks/` (project-specific)
+
+Each task directory contains a `task.yaml` (metadata, tools, model) and a `prompt.md` (system prompt template).
+
+## History & Resumption
+
+Wiggy tracks every task execution in a local SQLite database (`.wiggy/history.db`), recording task ID, branch, engine, session ID, cost, tokens, duration, and exit status.
+
+This enables resuming interrupted work:
+
+```bash
+# Resume by task ID
+wiggy run --resume-task abc12345
+
+# Resume by branch name
+wiggy run --resume-branch feat/add-auth
+
+# Resume by engine session ID
+wiggy run --resume-session sess_xyz
+
+# Chain a follow-up task from a parent
+wiggy run --continue-from abc12345 "Add tests for the feature"
+```
+
+View history with:
+
+```bash
+wiggy history -n 20
+```
+
+## Configuration
+
+Wiggy supports two levels of configuration via YAML files:
+
+- **Global:** `~/.wiggy/config.yaml` — user-wide defaults
+- **Local:** `.wiggy/config.yaml` — per-project overrides
+
+Local config takes precedence over global. Run the interactive wizard to set up:
+
+```bash
+wiggy init --global   # Set up global defaults
+wiggy init            # Set up local project config
+wiggy init --show     # Show resolved config
+```
+
+Configurable options include engine, executor, image, model, parallel count, worktree root, push/PR behavior, and git remote.
+
 ## Architecture
 
 ```
@@ -152,9 +275,27 @@ src/wiggy/
 │   └── shell.py     # Shell executor (WIP)
 ├── parsers/         # Output parsing system
 │   ├── base.py      # Abstract Parser class
+│   ├── messages.py  # ParsedMessage, MessageType, SessionSummary
 │   ├── claude.py    # Claude stream-json parser
 │   └── raw.py       # Raw passthrough parser
+├── git/             # Git operations
+│   ├── worktree.py  # WorktreeManager for isolated execution
+│   └── operations.py# Push & PR creation via gh CLI
+├── history/         # Task history & persistence
+│   ├── models.py    # TaskLog, TaskResult dataclasses
+│   ├── repository.py# SQLite-backed storage
+│   ├── schema.py    # DB schema & migrations
+│   └── cleanup.py   # Old task cleanup
+├── tasks/           # Named task system
+│   ├── base.py      # TaskSpec dataclass
+│   ├── loader.py    # Task discovery from YAML
+│   └── default/     # Built-in tasks (analyse, implement, review, ...)
+├── mcp/             # Model Context Protocol (WIP)
+│   └── compression.py
 └── config/          # Configuration & validation
+    ├── schema.py    # WiggyConfig dataclass
+    ├── loader.py    # Config file loading/saving
+    ├── wizard.py    # Interactive config setup
     ├── init.py      # .wiggy directory setup
     └── preflight.py # Environment checks
 ```
