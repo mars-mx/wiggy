@@ -240,30 +240,18 @@ class TestTaskResolution:
                 "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
             ),
             patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
-            patch(
-                "wiggy.tasks.loader.get_package_tasks_path",
-                return_value=tmp_path / "pkg",
-            ),
         ):
             spec = get_task_by_name("implement")
 
         assert spec is not None
         assert spec.description == "Local version"
 
-    def test_global_overrides_package(self, tmp_path: Path) -> None:
-        """Test that global tasks override package tasks."""
-        package_path = tmp_path / "package" / "tasks"
+    def test_global_used_when_no_local(self, tmp_path: Path) -> None:
+        """Test that global tasks are used when no local task exists."""
         global_path = tmp_path / "global" / "tasks"
-        local_path = tmp_path / "local" / "tasks"
+        local_path = tmp_path / "local" / "tasks"  # Empty, non-existent
 
-        # Package task
-        package_task = package_path / "analyse"
-        package_task.mkdir(parents=True)
-        (package_task / "task.yaml").write_text(
-            "name: analyse\ndescription: Package version"
-        )
-
-        # Global task (should win)
+        # Global task only
         global_task = global_path / "analyse"
         global_task.mkdir(parents=True)
         (global_task / "task.yaml").write_text(
@@ -275,14 +263,28 @@ class TestTaskResolution:
                 "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
             ),
             patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
-            patch(
-                "wiggy.tasks.loader.get_package_tasks_path", return_value=package_path
-            ),
         ):
             spec = get_task_by_name("analyse")
 
         assert spec is not None
         assert spec.description == "Global version"
+
+    def test_no_package_fallback(self, tmp_path: Path) -> None:
+        """Test that package tasks are not used as fallback at runtime."""
+        global_path = tmp_path / "global" / "tasks"  # Empty
+        local_path = tmp_path / "local" / "tasks"  # Empty
+
+        with (
+            patch(
+                "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
+            ),
+            patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
+        ):
+            # Task exists in package but not in global/local
+            spec = get_task_by_name("analyse")
+
+        # Should be None because no package fallback
+        assert spec is None
 
 
 class TestDefaultTasks:
@@ -291,39 +293,80 @@ class TestDefaultTasks:
     def test_default_tasks_constant(self) -> None:
         """Test DEFAULT_TASKS contains expected tasks."""
         assert "analyse" in DEFAULT_TASKS
-        assert "research" in DEFAULT_TASKS
+        assert "create-task" in DEFAULT_TASKS
         assert "implement" in DEFAULT_TASKS
-        assert "test" in DEFAULT_TASKS
+        assert "research" in DEFAULT_TASKS
         assert "review" in DEFAULT_TASKS
+        assert "test" in DEFAULT_TASKS
 
-    def test_package_default_tasks_exist(self) -> None:
-        """Test that package default tasks can be loaded."""
-        tasks = get_all_tasks()
+    def test_package_default_tasks_can_be_loaded(self) -> None:
+        """Test that package default tasks can be loaded when global points to package."""
+        from wiggy.tasks.loader import get_package_tasks_path
 
-        # Should have at least the 5 default tasks
-        assert len(tasks) >= 5
-        for task_name in DEFAULT_TASKS:
-            assert task_name in tasks
+        package_path = get_package_tasks_path()
+
+        # Mock global to point to package (simulating after 'wiggy init')
+        with (
+            patch(
+                "wiggy.tasks.loader.get_global_tasks_path", return_value=package_path
+            ),
+            patch(
+                "wiggy.tasks.loader.get_local_tasks_path",
+                return_value=Path("/nonexistent"),
+            ),
+        ):
+            tasks = get_all_tasks()
+
+            # Should have at least the default tasks
+            assert len(tasks) >= len(DEFAULT_TASKS)
+            for task_name in DEFAULT_TASKS:
+                assert task_name in tasks
 
     def test_default_tasks_have_prompts(self) -> None:
         """Test that default tasks have non-empty prompts."""
-        for task_name in DEFAULT_TASKS:
-            spec = get_task_by_name(task_name)
-            assert spec is not None, f"Task {task_name} not found"
-            assert spec.prompt_template, f"Task {task_name} has no prompt"
+        from wiggy.tasks.loader import get_package_tasks_path, load_task_from_dir
 
-    def test_default_tasks_have_all_tools(self) -> None:
-        """Test that default tasks have all tools enabled."""
-        for task_name in DEFAULT_TASKS:
-            spec = get_task_by_name(task_name)
-            assert spec is not None
-            assert spec.tools == ("*",), f"Task {task_name} should have all tools"
+        package_path = get_package_tasks_path()
 
-    def test_get_available_task_names(self) -> None:
+        # Directly load from package to test prompt content
+        for task_name in DEFAULT_TASKS:
+            task_dir = package_path / task_name
+            if task_dir.exists():
+                spec = load_task_from_dir(task_dir)
+                assert spec is not None, f"Task {task_name} not found in package"
+                assert spec.prompt_template, f"Task {task_name} has no prompt"
+
+    def test_create_task_has_restricted_tools(self) -> None:
+        """Test that create-task task has restricted tools."""
+        from wiggy.tasks.loader import get_package_tasks_path, load_task_from_dir
+
+        package_path = get_package_tasks_path()
+        task_dir = package_path / "create-task"
+
+        spec = load_task_from_dir(task_dir)
+        assert spec is not None
+        assert spec.tools != ("*",), "create-task should have restricted tools"
+        assert "Write" in spec.tools
+        assert "Read" in spec.tools
+
+    def test_get_available_task_names(self, tmp_path: Path) -> None:
         """Test get_available_task_names returns sorted list."""
-        names = get_available_task_names()
+        from wiggy.tasks.loader import get_package_tasks_path
 
-        assert isinstance(names, list)
-        assert names == sorted(names)
-        for task_name in DEFAULT_TASKS:
-            assert task_name in names
+        package_path = get_package_tasks_path()
+
+        with (
+            patch(
+                "wiggy.tasks.loader.get_global_tasks_path", return_value=package_path
+            ),
+            patch(
+                "wiggy.tasks.loader.get_local_tasks_path",
+                return_value=tmp_path / "nonexistent",
+            ),
+        ):
+            names = get_available_task_names()
+
+            assert isinstance(names, list)
+            assert names == sorted(names)
+            for task_name in DEFAULT_TASKS:
+                assert task_name in names

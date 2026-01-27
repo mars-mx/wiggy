@@ -29,6 +29,30 @@ def get_local_tasks_path() -> Path:
     return Path.cwd() / ".wiggy" / TASK_DIRNAME
 
 
+def get_task_search_paths() -> list[Path]:
+    """Return task search paths in priority order (highest first).
+
+    Resolution order:
+    1. Local project tasks (./.wiggy/tasks/) - highest priority
+    2. Global user tasks (~/.wiggy/tasks/)
+
+    No package fallback at runtime - tasks must exist in one of these locations.
+    """
+    paths = []
+
+    # Local project tasks (highest priority)
+    local = get_local_tasks_path()
+    if local.exists():
+        paths.append(local)
+
+    # Global user tasks
+    global_tasks = get_global_tasks_path()
+    if global_tasks.exists():
+        paths.append(global_tasks)
+
+    return paths
+
+
 def discover_task_dirs(base_path: Path) -> dict[str, Path]:
     """Discover task directories within a base path.
 
@@ -96,32 +120,26 @@ def load_task_from_dir(task_dir: Path) -> TaskSpec | None:
 
 
 def get_all_tasks() -> dict[str, TaskSpec]:
-    """Discover and load all tasks from all locations.
+    """Discover and load all tasks from filesystem locations.
 
     Resolution order (later wins for same name):
-    1. Package defaults (wiggy/tasks/default/)
-    2. Global (~/.wiggy/tasks/)
-    3. Project (./.wiggy/tasks/)
+    1. Global (~/.wiggy/tasks/)
+    2. Project (./.wiggy/tasks/)
+
+    No package fallback at runtime - run 'wiggy init' to copy default tasks.
 
     Returns dict mapping task name -> TaskSpec.
     """
     tasks: dict[str, TaskSpec] = {}
 
-    # 1. Package defaults (lowest priority)
-    package_tasks = discover_task_dirs(get_package_tasks_path())
-    for name, task_dir in package_tasks.items():
-        spec = load_task_from_dir(task_dir)
-        if spec:
-            tasks[name] = spec
-
-    # 2. Global tasks (overrides package)
+    # 1. Global tasks (lower priority)
     global_tasks = discover_task_dirs(get_global_tasks_path())
     for name, task_dir in global_tasks.items():
         spec = load_task_from_dir(task_dir)
         if spec:
             tasks[name] = spec
 
-    # 3. Local/project tasks (highest priority)
+    # 2. Local/project tasks (highest priority, overrides global)
     local_tasks = discover_task_dirs(get_local_tasks_path())
     for name, task_dir in local_tasks.items():
         spec = load_task_from_dir(task_dir)
@@ -134,7 +152,7 @@ def get_all_tasks() -> dict[str, TaskSpec]:
 def get_task_by_name(name: str) -> TaskSpec | None:
     """Get a specific task by name, using resolution order.
 
-    Checks local first, then global, then package defaults.
+    Checks local first, then global. No package fallback at runtime.
     """
     # Check local first (highest priority)
     local_path = get_local_tasks_path() / name
@@ -147,13 +165,6 @@ def get_task_by_name(name: str) -> TaskSpec | None:
     global_path = get_global_tasks_path() / name
     if global_path.exists():
         spec = load_task_from_dir(global_path)
-        if spec:
-            return spec
-
-    # Check package defaults
-    package_path = get_package_tasks_path() / name
-    if package_path.exists():
-        spec = load_task_from_dir(package_path)
         if spec:
             return spec
 

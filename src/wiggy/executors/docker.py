@@ -36,12 +36,20 @@ class DockerExecutor(Executor):
         executor_id: int = 1,
         quiet: bool = False,
         worktree_info: WorktreeInfo | None = None,
+        extra_args: tuple[str, ...] = (),
+        allowed_tools: list[str] | None = None,
+        mount_cwd: bool = False,
+        global_tasks_rw: bool = False,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
         self.executor_id = executor_id
         self.quiet = quiet
         self._worktree_info = worktree_info
+        self._extra_args = extra_args
+        self._allowed_tools = allowed_tools
+        self._mount_cwd = mount_cwd
+        self._global_tasks_rw = global_tasks_rw
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
         self._engine: Engine | None = None
@@ -80,6 +88,21 @@ class DockerExecutor(Executor):
                     "bind": str(main_git_dir),
                     "mode": "rw",
                 }
+        elif self._mount_cwd:
+            # Mount cwd as /workspace when no worktree (for task creation/execution)
+            cwd = Path.cwd()
+            volumes[str(cwd)] = {
+                "bind": "/workspace",
+                "mode": "rw",
+            }
+
+        # Mount global tasks directory
+        global_tasks = Path.home() / ".wiggy" / "tasks"
+        if global_tasks.exists():
+            volumes[str(global_tasks)] = {
+                "bind": "/home/wiggy/.wiggy/tasks",
+                "mode": "rw" if self._global_tasks_rw else "ro",
+            }
 
         # Mount credentials (read-only)
         if engine.credential_dir:
@@ -104,6 +127,11 @@ class DockerExecutor(Executor):
         command = [engine.cli_command]
         if self._model_override:
             command.extend(["--model", self._model_override])
+        # Add allowed tools if specified (not "*" which means all)
+        if self._allowed_tools is not None and self._allowed_tools != ["*"]:
+            command.extend(["--allowedTools", ",".join(self._allowed_tools)])
+        # Add extra args (e.g., --append-system-prompt)
+        command.extend(self._extra_args)
         command.extend(engine.default_args)
         if prompt:
             command.append(prompt)

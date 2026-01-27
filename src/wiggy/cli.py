@@ -10,7 +10,7 @@ from queue import Queue
 import click
 
 from wiggy import __version__
-from wiggy.config.init import ensure_wiggy_dir
+from wiggy.config.init import copy_default_tasks, ensure_wiggy_dir
 from wiggy.config.loader import (
     get_home_config_path,
     home_config_exists,
@@ -38,6 +38,13 @@ from wiggy.history import (
 from wiggy.monitor import Monitor
 from wiggy.parsers.messages import MessageType, ParsedMessage
 from wiggy.runner import resolve_engine
+from wiggy.tasks import (
+    TaskSpec,
+    get_all_tasks,
+    get_global_tasks_path,
+    get_local_tasks_path,
+    get_task_by_name,
+)
 
 
 def _hash_prompt(prompt: str | None) -> str | None:
@@ -602,6 +609,12 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
                 console.print("\nNo changes made.")
         else:
             run_home_wizard()
+        # Copy default tasks to global location
+        copied = copy_default_tasks(local=False)
+        if copied:
+            console.print(
+                f"[green]Copied {len(copied)} default tasks to ~/.wiggy/tasks/[/green]"
+            )
         return
 
     # Explicit --local flag: create/update local config
@@ -614,6 +627,12 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             return
         home_cfg = load_config()
         run_local_wizard(home_cfg)
+        # Copy default tasks to local (project) location
+        copied = copy_default_tasks(local=True)
+        if copied:
+            console.print(
+                f"[green]Copied {len(copied)} default tasks to ./.wiggy/tasks/[/green]"
+            )
         return
 
     # No flags: interactive flow
@@ -624,6 +643,11 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
         )
         if click.confirm("Is this your first time using wiggy?", default=True):
             run_home_wizard()
+            # Copy default tasks to global location
+            copied = copy_default_tasks(local=False)
+            if copied:
+                msg = f"[green]Copied {len(copied)} tasks to ~/.wiggy/tasks/[/green]"
+                console.print(msg)
         else:
             console.print(
                 "\nTo create a global config, run [cyan]wiggy init --global[/cyan]."
@@ -637,6 +661,13 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             "[dim]Use 'wiggy init --global' to update global settings.[/dim]"
         )
 
+        # Ensure global tasks exist
+        copied = copy_default_tasks(local=False)
+        if copied:
+            console.print(
+                f"[green]Copied {len(copied)} default tasks to ~/.wiggy/tasks/[/green]"
+            )
+
         if local_config_exists():
             console.print(
                 "\n[dim]Local project config already exists at .wiggy/config.yaml[/dim]"
@@ -644,13 +675,270 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             if click.confirm("Would you like to update it?", default=False):
                 home_cfg = load_config()
                 run_local_wizard(home_cfg)
+                # Copy any missing local tasks
+                copied = copy_default_tasks(local=True)
+                if copied:
+                    msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
             else:
-                console.print("\nNo changes made.")
+                console.print("\nNo config changes made.")
+                # Still copy any missing local tasks
+                copied = copy_default_tasks(local=True)
+                if copied:
+                    msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
         else:
             if click.confirm(
                 "\nWould you like to create project-specific overrides?", default=False
             ):
                 home_cfg = load_config()
                 run_local_wizard(home_cfg)
+                # Copy default tasks to local location
+                copied = copy_default_tasks(local=True)
+                if copied:
+                    msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
             else:
-                console.print("\nUsing global configuration. No changes made.")
+                console.print("\nUsing global configuration.")
+                # Still copy default tasks to local location
+                copied = copy_default_tasks(local=True)
+                if copied:
+                    msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
+
+
+def _get_source_label(task: TaskSpec) -> str:
+    """Get a label indicating whether task is from global or local."""
+    if task.source is None:
+        return ""
+    source_str = str(task.source)
+    if ".wiggy/tasks" in source_str:
+        if str(Path.cwd()) in source_str:
+            return "(local)"
+        return "(global)"
+    return ""
+
+
+def _format_tasks_context(tasks: dict[str, TaskSpec]) -> str:
+    """Format tasks as context for AI prompts."""
+    lines = []
+    for name, spec in sorted(tasks.items()):
+        tools_str = ", ".join(spec.tools) if spec.tools else "none"
+        lines.append(f"### {name}")
+        lines.append(spec.description.strip())
+        lines.append(f"Tools: {tools_str}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def task(ctx: click.Context) -> None:
+    """Run and manage tasks.
+
+    Use subcommands: wiggy task list, wiggy task run, wiggy task create
+    """
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@task.command("list")
+@click.option("--verbose", "-v", is_flag=True, help="Show task details.")
+def task_list(verbose: bool) -> None:
+    """List available tasks."""
+    tasks = get_all_tasks()
+
+    if not tasks:
+        console.print("[yellow]No tasks found.[/yellow]")
+        console.print(
+            "[dim]Run 'wiggy init' to copy default tasks to ~/.wiggy/tasks/[/dim]"
+        )
+        return
+
+    console.print("[bold]Available Tasks:[/bold]\n")
+    for name, spec in sorted(tasks.items()):
+        source_label = _get_source_label(spec)
+        console.print(f"  [cyan]{name}[/cyan] {source_label}")
+        if verbose:
+            console.print(f"    {spec.description.strip()}")
+            tools_str = ", ".join(spec.tools) if spec.tools else "all"
+            console.print(f"    [dim]Tools: {tools_str}[/dim]")
+            console.print()
+
+
+@task.command("run")
+@click.argument("task_name")
+@click.option("--engine", "-e", help="AI engine to use.")
+@click.option("--model", "-m", help="Model to use (overrides task default).")
+@click.option("--prompt", "-p", help="Additional prompt/instructions.")
+def task_run(
+    task_name: str,
+    engine: str | None,
+    model: str | None,
+    prompt: str | None,
+) -> None:
+    """Run a task by name."""
+    spec = get_task_by_name(task_name)
+    if spec is None:
+        console.print(f"[red]Unknown task: {task_name}[/red]")
+        console.print("[dim]Run 'wiggy task list' to see available tasks.[/dim]")
+        raise SystemExit(1)
+
+    # Resolve engine
+    resolved_engine = resolve_engine(engine)
+    if resolved_engine is None:
+        raise SystemExit(1)
+
+    # Use task's model preference if not overridden
+    effective_model = model or spec.model
+
+    # Build allowed_tools from task spec
+    allowed_tools: list[str] | None = None
+    if spec.tools and spec.tools != ("*",):
+        allowed_tools = list(spec.tools)
+
+    # Build extra args for --append-system-prompt if task has a prompt file
+    extra_args: tuple[str, ...] = ()
+    if spec.source:
+        prompt_path = spec.source / "prompt.md"
+        if prompt_path.exists():
+            # Container mount path for global tasks
+            container_prompt_path = f"/home/wiggy/.wiggy/tasks/{task_name}/prompt.md"
+            extra_args = ("--append-system-prompt", container_prompt_path)
+
+    console.print(f"[bold green]Running task: {task_name}[/bold green]")
+    console.print(f"[dim]Engine: {resolved_engine.name}[/dim]")
+    if effective_model:
+        console.print(f"[dim]Model: {effective_model}[/dim]")
+    if allowed_tools:
+        console.print(f"[dim]Tools: {', '.join(allowed_tools)}[/dim]")
+    if prompt:
+        console.print(f"[dim]Prompt: {prompt}[/dim]")
+
+    # Create executor with task settings - mount cwd so tasks can access project files
+    executors = get_executors(
+        name="docker",
+        count=1,
+        model=effective_model,
+        quiet=True,
+        extra_args=extra_args,
+        allowed_tools=allowed_tools,
+        mount_cwd=True,
+    )
+
+    executor = executors[0]
+    executor.setup(resolved_engine, prompt)
+
+    try:
+        for msg in executor.run():
+            # Simple output - in production, use Monitor
+            if msg.content:
+                console.print(msg.content)
+    finally:
+        executor.teardown()
+
+    exit_code = executor.exit_code or 0
+    if exit_code != 0:
+        console.print(f"[red]Task failed with exit code: {exit_code}[/red]")
+        raise SystemExit(exit_code)
+
+    console.print("[green]Task completed successfully.[/green]")
+
+
+@task.command("create")
+@click.option("--local", "-l", is_flag=True, help="Create task in local directory.")
+def task_create(local: bool) -> None:
+    """Create a new task via AI assistance."""
+    # Check that create-task exists
+    create_task_spec = get_task_by_name("create-task")
+    if create_task_spec is None:
+        console.print("[red]The 'create-task' task is not available.[/red]")
+        console.print("[dim]Run 'wiggy init' to copy default tasks.[/dim]")
+        raise SystemExit(1)
+
+    # Get user input for what they want the task to do
+    console.print("[bold]Create a new wiggy task[/bold]\n")
+    goal = click.prompt("What do you want this task to achieve?")
+
+    # Determine target directory and mount options
+    if local:
+        target_dir = get_local_tasks_path()
+        container_target_dir = "/workspace/.wiggy/tasks"
+        mount_cwd = True
+        global_tasks_rw = False
+    else:
+        target_dir = get_global_tasks_path()
+        container_target_dir = "/home/wiggy/.wiggy/tasks"
+        mount_cwd = False
+        global_tasks_rw = True
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get existing tasks for context
+    existing_tasks = get_all_tasks()
+    tasks_context = _format_tasks_context(existing_tasks)
+
+    # Build the main prompt with container paths
+    main_prompt = f"""## Goal
+
+{goal}
+
+## Target Directory
+
+Create the new task files in: {container_target_dir}
+
+## Existing Tasks (for reference)
+
+{tasks_context}
+"""
+
+    # Resolve engine
+    resolved_engine = resolve_engine(None)
+    if resolved_engine is None:
+        raise SystemExit(1)
+
+    # Build allowed_tools from create-task spec
+    allowed_tools: list[str] | None = None
+    if create_task_spec.tools and create_task_spec.tools != ("*",):
+        allowed_tools = list(create_task_spec.tools)
+
+    # Build extra args for --append-system-prompt
+    extra_args: tuple[str, ...] = ()
+    if create_task_spec.source:
+        prompt_path = create_task_spec.source / "prompt.md"
+        if prompt_path.exists():
+            container_prompt_path = "/home/wiggy/.wiggy/tasks/create-task/prompt.md"
+            extra_args = ("--append-system-prompt", container_prompt_path)
+
+    console.print("\n[bold green]Creating task with AI assistance...[/bold green]")
+    console.print(f"[dim]Engine: {resolved_engine.name}[/dim]")
+    console.print(f"[dim]Target: {target_dir}[/dim]")
+
+    # Create executor with appropriate mount options
+    executors = get_executors(
+        name="docker",
+        count=1,
+        quiet=True,
+        extra_args=extra_args,
+        allowed_tools=allowed_tools,
+        mount_cwd=mount_cwd,
+        global_tasks_rw=global_tasks_rw,
+    )
+
+    executor = executors[0]
+    executor.setup(resolved_engine, main_prompt)
+
+    try:
+        for msg in executor.run():
+            if msg.content:
+                console.print(msg.content)
+    finally:
+        executor.teardown()
+
+    exit_code = executor.exit_code or 0
+    if exit_code != 0:
+        console.print(f"[red]Task creation failed with exit code: {exit_code}[/red]")
+        raise SystemExit(exit_code)
+
+    console.print("\n[green]Task created successfully![/green]")
+    console.print("[dim]Run 'wiggy task list' to see available tasks.[/dim]")

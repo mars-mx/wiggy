@@ -1,6 +1,38 @@
 """Initialization logic for wiggy directory structure."""
 
+import shutil
 from pathlib import Path
+
+from wiggy.tasks.loader import discover_task_dirs, get_package_tasks_path
+
+
+def copy_default_tasks(local: bool = False) -> list[str]:
+    """Copy default tasks from package to task directory.
+
+    Args:
+        local: If True, copy to ./.wiggy/tasks/ (project-local).
+               If False, copy to ~/.wiggy/tasks/ (global, default).
+
+    Returns:
+        List of task names that were copied.
+    """
+    package_tasks_path = get_package_tasks_path()
+
+    if local:
+        target = Path.cwd() / ".wiggy" / "tasks"
+    else:
+        target = Path.home() / ".wiggy" / "tasks"
+
+    target.mkdir(parents=True, exist_ok=True)
+
+    copied: list[str] = []
+    for task_name, task_dir in discover_task_dirs(package_tasks_path).items():
+        dest = target / task_name
+        if not dest.exists():
+            shutil.copytree(task_dir, dest)
+            copied.append(task_name)
+
+    return copied
 
 
 def ensure_wiggy_dir() -> None:

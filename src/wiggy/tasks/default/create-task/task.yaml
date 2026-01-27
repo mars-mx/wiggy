@@ -1,0 +1,8 @@
+name: create-task
+description: |
+  Meta-task for creating new wiggy tasks. Generates task.yaml
+  and prompt.md files based on user goals.
+tools:
+  - Write
+  - Read
+  - Bash

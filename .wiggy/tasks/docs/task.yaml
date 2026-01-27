@@ -1,0 +1,10 @@
+name: docs
+description: |
+  Research official documentation for external frameworks and packages
+  used in the codebase. Extracts version info and provides API summaries.
+tools:
+  - Read
+  - Glob
+  - Grep
+  - WebSearch
+  - WebFetch

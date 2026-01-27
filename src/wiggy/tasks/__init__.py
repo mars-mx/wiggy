@@ -9,6 +9,7 @@ from wiggy.tasks.loader import (
     get_local_tasks_path,
     get_package_tasks_path,
     get_task_by_name,
+    get_task_search_paths,
     global_tasks_exist,
 )
 
@@ -21,14 +22,16 @@ __all__ = [
     "get_local_tasks_path",
     "get_package_tasks_path",
     "get_task_by_name",
+    "get_task_search_paths",
     "global_tasks_exist",
 ]
 
 # Default task names for reference
 DEFAULT_TASKS: tuple[str, ...] = (
     "analyse",
-    "research",
+    "create-task",
     "implement",
-    "test",
+    "research",
     "review",
+    "test",
 )
