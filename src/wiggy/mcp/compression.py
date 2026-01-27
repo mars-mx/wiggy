@@ -68,13 +68,9 @@ def compress_result(result_text: str, timeout: int = 60) -> str:
         )
         result.check_returncode()
     except subprocess.TimeoutExpired as err:
-        raise CompressionError(
-            f"Compression timed out after {timeout}s"
-        ) from err
+        raise CompressionError(f"Compression timed out after {timeout}s") from err
     except subprocess.CalledProcessError as exc:
-        raise CompressionError(
-            f"Compression failed: {exc.stderr}"
-        ) from exc
+        raise CompressionError(f"Compression failed: {exc.stderr}") from exc
     except FileNotFoundError as err:
         raise CompressionError("claude CLI not found") from err
 

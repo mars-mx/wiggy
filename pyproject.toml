@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "docker>=7.0",
+    "mcp>=1.0",
     "pyyaml>=6.0",
     "rich>=13.0",
 ]
