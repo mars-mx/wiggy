@@ -1,6 +1,7 @@
 """Command-line interface for wiggy."""
 
 import hashlib
+import logging
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -35,6 +36,7 @@ from wiggy.history import (
     TaskNotFoundError,
     cleanup_old_tasks,
 )
+from wiggy.mcp import WiggyMCPServer
 from wiggy.monitor import Monitor
 from wiggy.parsers.messages import MessageType, ParsedMessage
 from wiggy.runner import resolve_engine
@@ -46,12 +48,65 @@ from wiggy.tasks import (
     get_task_by_name,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _hash_prompt(prompt: str | None) -> str | None:
     """Generate SHA256[:16] hash of prompt for deduplication."""
     if prompt is None:
         return None
     return hashlib.sha256(prompt.encode()).hexdigest()[:16]
+
+
+def _check_task_result(
+    repo: TaskHistoryRepository, task_id: str, task_name: str | None
+) -> None:
+    """Check if the task wrote a result and log a warning if not."""
+    result = repo.get_result_by_task_id(task_id)
+    if result is None:
+        display_name = task_name or task_id
+        logger.warning("Task '%s' did not call write_result", display_name)
+        console.print(
+            f"[dim yellow]Warning: Task '{display_name}' did not write a result"
+            "[/dim yellow]"
+        )
+
+
+def build_mcp_system_prompt(
+    process_id: str,
+    current_task_name: str,
+    completed_steps: list[str],
+    repo: TaskHistoryRepository,
+) -> str:
+    """Build a system prompt hint for MCP-aware tasks.
+
+    Returns a prompt fragment describing available MCP tools and prior step
+    context for multi-step processes.
+    """
+    lines = [
+        "You are running as part of a multi-step process. "
+        "You have access to wiggy MCP tools:",
+        "- Use `read_result_summary` to load context from previous steps",
+        "- Use `write_result` before finishing to pass your findings to the next step",
+    ]
+
+    if completed_steps:
+        steps_str = ", ".join(f"{s} (completed)" for s in completed_steps)
+        lines.append(f"\nPrevious steps in this process: {steps_str}")
+
+    lines.append(f"Current step: {current_task_name}")
+
+    return "\n".join(lines)
+
+
+def _build_single_task_mcp_prompt() -> str:
+    """Build a simpler MCP system prompt for single task execution."""
+    return (
+        "You have access to wiggy MCP tools:\n"
+        "- Use `write_result` before finishing to save your findings\n"
+        "- Use `read_result_summary` to load context from previous "
+        "task executions"
+    )
 
 
 def _resolve_resume_target(
@@ -112,27 +167,32 @@ def main(ctx: click.Context) -> None:
 @main.command()
 @click.argument("prompt", required=False)
 @click.option(
-    "--engine", "-e",
+    "--engine",
+    "-e",
     help="AI engine to use (e.g., claude, opencode, codex).",
 )
 @click.option(
-    "--executor", "-x",
+    "--executor",
+    "-x",
     type=click.Choice(list(EXECUTORS.keys())),
     default=DEFAULT_EXECUTOR,
     help="Executor to use.",
 )
 @click.option(
-    "--image", "-i",
+    "--image",
+    "-i",
     help="Docker image to use (overrides engine default). Only for docker executor.",
 )
 @click.option(
-    "--parallel", "-p",
+    "--parallel",
+    "-p",
     type=int,
     default=1,
     help="Number of executor instances to spawn in parallel.",
 )
 @click.option(
-    "--model", "-m",
+    "--model",
+    "-m",
     help="Model to use (overrides engine default). Passed to engine CLI.",
 )
 @click.option(
@@ -328,118 +388,149 @@ def run(
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
-    # Create executor instances with worktree info
-    executors = get_executors(
-        name=executor,
-        count=parallel,
-        image=image,
-        model=model,
-        quiet=True,
-        worktree_infos=worktree_infos if worktree_infos else None,
-    )
-
-    # Generate process_id and task_ids, create task log records
+    # Generate process_id for this run
     process_id = secrets.token_hex(4)
-    task_logs: list[TaskLog] = []
-    start_time = datetime.now(UTC)
 
-    for i, ex in enumerate(executors, 1):
-        task_id = secrets.token_hex(4)
-        ex.set_task_id(task_id)
-
-        # Get worktree info for this executor
-        wt_info = worktree_infos[i - 1] if worktree_infos else None
-
-        task_log = TaskLog(
-            task_id=task_id,
-            process_id=process_id,
-            executor_id=i,
-            created_at=start_time.isoformat(),
-            branch=wt_info.branch if wt_info else "main",
-            worktree=str(wt_info.path) if wt_info else str(Path.cwd()),
-            main_repo=str(wt_info.main_repo) if wt_info else str(Path.cwd()),
-            engine=resolved_engine.name,
-            model=model,
-            prompt=prompt,
-            prompt_hash=_hash_prompt(prompt),
-            parent_id=parent_task.task_id if parent_task else None,
+    # Start MCP server for task result storage
+    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id)
+    mcp_port: int | None = None
+    try:
+        mcp_port = mcp_server.start()
+        console.print(f"[dim]MCP server started on port {mcp_port}[/dim]")
+    except Exception:
+        logger.warning(
+            "MCP server failed to start, continuing without MCP",
+            exc_info=True,
         )
-        repo.create(task_log)
-        task_logs.append(task_log)
-        console.print(f"[dim]Task {task_id} created for executor {i}[/dim]")
-
-    # Create monitor for real-time status display
-    monitor = Monitor(resolved_engine.name, parallel, model=model)
-
-    # Queue for messages from executor threads: (executor_id, message or None for done)
-    queue: Queue[tuple[int, ParsedMessage | None]] = Queue()
-
-    # Track session_id updates per executor
-    session_ids: dict[int, str | None] = {}
-
-    def run_single(ex: Executor) -> int | None:
-        """Run a single executor, pushing messages to the queue."""
-        ex.setup(resolved_engine, prompt)
-        try:
-            for msg in ex.run():
-                queue.put((ex.executor_id, msg))
-        finally:
-            ex.teardown()
-            queue.put((ex.executor_id, None))  # Signal completion
-        return ex.exit_code
+        console.print(
+            "[dim yellow]MCP server failed to start, "
+            "continuing without MCP[/dim yellow]"
+        )
 
     try:
-        monitor.start()
-
-        with ThreadPoolExecutor(max_workers=parallel) as pool:
-            futures = [pool.submit(run_single, ex) for ex in executors]
-
-            # Process messages until all executors complete
-            completed = 0
-            while completed < parallel:
-                exec_id, msg = queue.get()
-                if msg is None:
-                    completed += 1
-                else:
-                    monitor.update(exec_id, msg)
-                    # Capture session_id from SYSTEM_INIT messages
-                    if msg.message_type == MessageType.SYSTEM_INIT:
-                        engine_session_id = msg.metadata.get("session_id")
-                        if engine_session_id:
-                            session_ids[exec_id] = engine_session_id
-                            exec_task_id = executors[exec_id - 1].task_id
-                            if exec_task_id:
-                                repo.update_session_id(exec_task_id, engine_session_id)
-
-            # Collect exit codes
-            exit_codes = [f.result() for f in futures]
-
-    finally:
-        monitor.stop()
-
-    # Complete task logs with results
-    end_time = datetime.now(UTC)
-    duration_ms = int((end_time - start_time).total_seconds() * 1000)
-
-    for task_log, exit_code, exec_instance in zip(
-        task_logs, exit_codes, executors, strict=True
-    ):
-        success = exit_code == 0
-        summary = exec_instance.summary
-        repo.complete(
-            task_log.task_id,
-            success=success,
-            exit_code=exit_code or 0,
-            finished_at=end_time.isoformat(),
-            duration_ms=duration_ms,
-            error_message=None if success else f"Exit code: {exit_code}",
-            total_cost=summary.total_cost if summary else None,
-            input_tokens=summary.input_tokens if summary else None,
-            output_tokens=summary.output_tokens if summary else None,
+        # Create executor instances with worktree info
+        executors = get_executors(
+            name=executor,
+            count=parallel,
+            image=image,
+            model=model,
+            quiet=True,
+            worktree_infos=worktree_infos if worktree_infos else None,
+            mcp_port=mcp_port,
         )
 
-    # Check for failures
-    any_failed = any(code != 0 for code in exit_codes)
+        # Generate task_ids, create task log records
+        task_logs: list[TaskLog] = []
+        start_time = datetime.now(UTC)
+
+        for i, ex in enumerate(executors, 1):
+            task_id = secrets.token_hex(4)
+            ex.set_task_id(task_id)
+
+            # Get worktree info for this executor
+            wt_info = worktree_infos[i - 1] if worktree_infos else None
+
+            task_log = TaskLog(
+                task_id=task_id,
+                process_id=process_id,
+                executor_id=i,
+                created_at=start_time.isoformat(),
+                branch=wt_info.branch if wt_info else "main",
+                worktree=str(wt_info.path) if wt_info else str(Path.cwd()),
+                main_repo=str(wt_info.main_repo) if wt_info else str(Path.cwd()),
+                engine=resolved_engine.name,
+                model=model,
+                prompt=prompt,
+                prompt_hash=_hash_prompt(prompt),
+                parent_id=parent_task.task_id if parent_task else None,
+            )
+            repo.create(task_log)
+            task_logs.append(task_log)
+            console.print(f"[dim]Task {task_id} created for executor {i}[/dim]")
+
+        # Create monitor for real-time status display
+        monitor = Monitor(resolved_engine.name, parallel, model=model)
+
+        # Queue for messages from executor threads: (executor_id, message or None)
+        queue: Queue[tuple[int, ParsedMessage | None]] = Queue()
+
+        # Track session_id updates per executor
+        session_ids: dict[int, str | None] = {}
+
+        def run_single(ex: Executor) -> int | None:
+            """Run a single executor, pushing messages to the queue."""
+            ex.setup(resolved_engine, prompt)
+            try:
+                for msg in ex.run():
+                    queue.put((ex.executor_id, msg))
+            finally:
+                ex.teardown()
+                queue.put((ex.executor_id, None))  # Signal completion
+            return ex.exit_code
+
+        try:
+            monitor.start()
+
+            with ThreadPoolExecutor(max_workers=parallel) as pool:
+                futures = [pool.submit(run_single, ex) for ex in executors]
+
+                # Process messages until all executors complete
+                completed = 0
+                while completed < parallel:
+                    exec_id, msg = queue.get()
+                    if msg is None:
+                        completed += 1
+                    else:
+                        monitor.update(exec_id, msg)
+                        # Capture session_id from SYSTEM_INIT messages
+                        if msg.message_type == MessageType.SYSTEM_INIT:
+                            engine_session_id = msg.metadata.get("session_id")
+                            if engine_session_id:
+                                session_ids[exec_id] = engine_session_id
+                                exec_task_id = executors[exec_id - 1].task_id
+                                if exec_task_id:
+                                    repo.update_session_id(
+                                        exec_task_id, engine_session_id
+                                    )
+
+                # Collect exit codes
+                exit_codes = [f.result() for f in futures]
+
+        finally:
+            monitor.stop()
+
+        # Complete task logs with results
+        end_time = datetime.now(UTC)
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
+
+        for task_log, exit_code, exec_instance in zip(
+            task_logs, exit_codes, executors, strict=True
+        ):
+            success = exit_code == 0
+            summary = exec_instance.summary
+            repo.complete(
+                task_log.task_id,
+                success=success,
+                exit_code=exit_code or 0,
+                finished_at=end_time.isoformat(),
+                duration_ms=duration_ms,
+                error_message=None if success else f"Exit code: {exit_code}",
+                total_cost=summary.total_cost if summary else None,
+                input_tokens=summary.input_tokens if summary else None,
+                output_tokens=summary.output_tokens if summary else None,
+            )
+
+        # Post-step validation: check if tasks wrote results
+        for task_log in task_logs:
+            _check_task_result(repo, task_log.task_id, task_log.task_name)
+
+        # Check for failures
+        any_failed = any(code != 0 for code in exit_codes)
+    finally:
+        try:
+            mcp_server.stop()
+        except Exception:
+            logger.warning("MCP server failed to stop cleanly", exc_info=True)
 
     # Post-execution git operations
     if worktree_infos:
@@ -458,12 +549,16 @@ def run(
                 if push and git_ops.has_commits():
                     console.print(f"[dim]Pushing {info.branch} to {remote}...[/dim]")
                     if git_ops.push_to_remote(remote):
-                        console.print(f"[green]Pushed {info.branch} to {remote}[/green]")
+                        console.print(
+                            f"[green]Pushed {info.branch} to {remote}[/green]"
+                        )
                     else:
                         console.print(f"[yellow]Failed to push {info.branch}[/yellow]")
 
                 if pr and push and git_ops.has_commits():
-                    console.print(f"[dim]Creating pull request for {info.branch}...[/dim]")
+                    console.print(
+                        f"[dim]Creating pull request for {info.branch}...[/dim]"
+                    )
                     pr_url = git_ops.create_pull_request()
                     if pr_url:
                         console.print(f"[green]PR created: {pr_url}[/green]")
@@ -479,7 +574,9 @@ def run(
                     try:
                         wt_manager.remove_worktree(info, force=True)
                     except WorktreeError as e:
-                        console.print(f"[yellow]Failed to remove worktree: {e}[/yellow]")
+                        console.print(
+                            f"[yellow]Failed to remove worktree: {e}[/yellow]"
+                        )
 
     # Exit with failure code if any executor failed
     if any_failed:
@@ -526,12 +623,15 @@ def cleanup(older_than: int, dry_run: bool) -> None:
         if deleted:
             console.print(f"[green]Deleted {len(deleted)} tasks and log files.[/green]")
         else:
-            console.print(f"[dim]No tasks older than {older_than} days to clean up.[/dim]")
+            console.print(
+                f"[dim]No tasks older than {older_than} days to clean up.[/dim]"
+            )
 
 
 @main.command()
 @click.option(
-    "--limit", "-n",
+    "--limit",
+    "-n",
     default=10,
     type=int,
     help="Number of recent tasks to show (default: 10).",
@@ -551,26 +651,32 @@ def history(limit: int) -> None:
 
     console.print(f"[bold]Recent Tasks ({len(tasks)}):[/bold]\n")
     for task in tasks:
-        status = "[green]✓[/green]" if task.success else (
-            "[red]✗[/red]" if task.success is False else "[yellow]?[/yellow]"
+        status = (
+            "[green]✓[/green]"
+            if task.success
+            else ("[red]✗[/red]" if task.success is False else "[yellow]?[/yellow]")
         )
         console.print(f"  {status} [cyan]{task.task_id}[/cyan] | {task.branch}")
         console.print(f"      Engine: {task.engine} | Created: {task.created_at[:19]}")
         if task.prompt:
-            prompt_preview = task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
+            prompt_preview = (
+                task.prompt[:50] + "..." if len(task.prompt) > 50 else task.prompt
+            )
             console.print(f"      Prompt: {prompt_preview}")
         console.print()
 
 
 @main.command()
 @click.option(
-    "--global", "-g",
+    "--global",
+    "-g",
     "global_config",
     is_flag=True,
     help="Create or update global config (~/.wiggy/config.yaml).",
 )
 @click.option(
-    "--local", "-l",
+    "--local",
+    "-l",
     "local_config",
     is_flag=True,
     help="Create or update local config (./.wiggy/config.yaml).",
@@ -657,9 +763,7 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
         console.print(
             f"[green]Global configuration found at {get_home_config_path()}[/green]"
         )
-        console.print(
-            "[dim]Use 'wiggy init --global' to update global settings.[/dim]"
-        )
+        console.print("[dim]Use 'wiggy init --global' to update global settings.[/dim]")
 
         # Ensure global tasks exist
         copied = copy_default_tasks(local=False)
@@ -815,34 +919,70 @@ def task_run(
     if prompt:
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
-    # Create executor with task settings - mount cwd so tasks can access project files
-    executors = get_executors(
-        name="docker",
-        count=1,
-        model=effective_model,
-        quiet=True,
-        extra_args=extra_args,
-        allowed_tools=allowed_tools,
-        mount_cwd=True,
-    )
+    # Initialize repository and MCP server for single task execution
+    repo = TaskHistoryRepository()
+    process_id = secrets.token_hex(4)
+    task_id = secrets.token_hex(4)
 
-    executor = executors[0]
-    executor.setup(resolved_engine, prompt)
+    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id)
+    mcp_port: int | None = None
+    try:
+        mcp_port = mcp_server.start()
+        console.print(f"[dim]MCP server started on port {mcp_port}[/dim]")
+    except Exception:
+        logger.warning(
+            "MCP server failed to start, continuing without MCP",
+            exc_info=True,
+        )
+        console.print(
+            "[dim yellow]MCP server failed to start, "
+            "continuing without MCP[/dim yellow]"
+        )
+
+    # Inject single-task MCP system prompt via extra_args
+    if mcp_port is not None:
+        mcp_prompt = _build_single_task_mcp_prompt()
+        extra_args = (*extra_args, "--append-system-prompt", mcp_prompt)
 
     try:
-        for msg in executor.run():
-            # Simple output - in production, use Monitor
-            if msg.content:
-                console.print(msg.content)
+        # Create executor with task settings - mount cwd for project files
+        executors = get_executors(
+            name="docker",
+            count=1,
+            model=effective_model,
+            quiet=True,
+            extra_args=extra_args,
+            allowed_tools=allowed_tools,
+            mount_cwd=True,
+            mcp_port=mcp_port,
+        )
+
+        executor = executors[0]
+        executor.set_task_id(task_id)
+        executor.setup(resolved_engine, prompt)
+
+        try:
+            for msg in executor.run():
+                # Simple output - in production, use Monitor
+                if msg.content:
+                    console.print(msg.content)
+        finally:
+            executor.teardown()
+
+        # Post-step validation
+        _check_task_result(repo, task_id, task_name)
+
+        exit_code = executor.exit_code or 0
+        if exit_code != 0:
+            console.print(f"[red]Task failed with exit code: {exit_code}[/red]")
+            raise SystemExit(exit_code)
+
+        console.print("[green]Task completed successfully.[/green]")
     finally:
-        executor.teardown()
-
-    exit_code = executor.exit_code or 0
-    if exit_code != 0:
-        console.print(f"[red]Task failed with exit code: {exit_code}[/red]")
-        raise SystemExit(exit_code)
-
-    console.print("[green]Task completed successfully.[/green]")
+        try:
+            mcp_server.stop()
+        except Exception:
+            logger.warning("MCP server failed to stop cleanly", exc_info=True)
 
 
 @task.command("create")
