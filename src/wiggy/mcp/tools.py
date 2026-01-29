@@ -2,6 +2,7 @@
 
 import json
 import logging
+import sqlite3
 from typing import Any
 
 from wiggy.history.repository import TaskHistoryRepository
@@ -38,7 +39,17 @@ def handle_write_result(
     if not task_id:
         return json.dumps({"error": "Missing X-Wiggy-Task-ID header."})
 
-    repo.create_result(task_id, result, key_files or [], tags or [])
+    try:
+        repo.create_result(task_id, result, key_files or [], tags or [])
+    except sqlite3.IntegrityError:
+        logger.error(
+            "FK constraint failed for task_id=%s — no task_log record exists",
+            task_id,
+        )
+        return json.dumps({
+            "error": f"Task '{task_id}' not found in task_log. "
+            "The task may not have been registered before execution."
+        })
 
     summary_preview = "Compression skipped"
     if is_compression_available():
@@ -46,10 +57,11 @@ def handle_write_result(
             summary_text = compress_result(result)
             repo.update_summary(task_id, summary_text)
             summary_preview = summary_text[:200]
-        except CompressionError:
+        except CompressionError as exc:
             logger.warning(
-                "Compression failed for task %s, result saved without summary",
+                "Compression failed for task %s: %s",
                 task_id,
+                exc,
             )
 
     response: dict[str, Any] = {

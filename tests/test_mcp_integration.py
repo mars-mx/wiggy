@@ -70,8 +70,10 @@ class TestMCPServerLifecycleInRun:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.load_config")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
     def test_mcp_server_lifecycle_in_run(
         self,
+        _mock_bind_host: MagicMock,
         mock_load_config: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -155,8 +157,10 @@ class TestMCPServerLifecycleInRun:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.load_config")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
     def test_mcp_server_stop_on_error(
         self,
+        _mock_bind_host: MagicMock,
         mock_load_config: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -229,8 +233,10 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.get_task_by_name")
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
     def test_mcp_server_lifecycle_in_task_run(
         self,
+        _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
         mock_get_task: MagicMock,
@@ -282,8 +288,10 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.get_task_by_name")
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
     def test_mcp_port_passed_to_executor(
         self,
+        _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
         mock_get_task: MagicMock,
@@ -331,8 +339,10 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.get_task_by_name")
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
     def test_mcp_server_stop_on_error(
         self,
+        _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
         mock_get_task: MagicMock,
@@ -372,6 +382,171 @@ class TestMCPServerLifecycleInTaskRun:
 
         # stop() must be called even on error
         mock_mcp.stop.assert_called_once()
+
+
+# ── MCP Tool Allowlist Tests ────────────────────────────────────────
+
+
+class TestMCPToolAllowlist:
+    """Tests for MCP tool names being added to --allowedTools."""
+
+    @patch("wiggy.cli.get_executors")
+    @patch("wiggy.cli.resolve_engine")
+    @patch("wiggy.cli.get_task_by_name")
+    @patch("wiggy.cli.WiggyMCPServer")
+    @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    def test_mcp_tools_added_to_allowed_tools(
+        self,
+        _mock_bind_host: MagicMock,
+        mock_repo_cls: MagicMock,
+        mock_mcp_cls: MagicMock,
+        mock_get_task: MagicMock,
+        mock_resolve: MagicMock,
+        mock_get_executors: MagicMock,
+    ) -> None:
+        """MCP tool names are appended when tools are restricted."""
+        from click.testing import CliRunner
+
+        from wiggy.cli import main
+        from wiggy.mcp import MCP_TOOL_NAMES
+
+        mock_spec = MagicMock()
+        mock_spec.model = None
+        mock_spec.tools = ("Read", "Glob", "Grep")
+        mock_spec.source = None
+        mock_get_task.return_value = mock_spec
+
+        mock_engine = MagicMock()
+        mock_engine.name = "claude"
+        mock_resolve.return_value = mock_engine
+
+        mock_repo = MagicMock()
+        mock_repo.get_result_by_task_id.return_value = None
+        mock_repo_cls.return_value = mock_repo
+
+        mock_mcp = MagicMock()
+        mock_mcp.start.return_value = 8888
+        mock_mcp_cls.return_value = mock_mcp
+
+        mock_exec = MagicMock()
+        mock_exec.exit_code = 0
+        mock_exec.run.return_value = iter([])
+        mock_get_executors.return_value = [mock_exec]
+
+        runner = CliRunner()
+        runner.invoke(main, ["task", "run", "docs"])
+
+        call_kwargs = mock_get_executors.call_args[1]
+        allowed = call_kwargs["allowed_tools"]
+
+        # Original tools should be present
+        assert "Read" in allowed
+        assert "Glob" in allowed
+        assert "Grep" in allowed
+        # MCP tools should also be present
+        for mcp_tool in MCP_TOOL_NAMES:
+            assert mcp_tool in allowed
+
+    @patch("wiggy.cli.get_executors")
+    @patch("wiggy.cli.resolve_engine")
+    @patch("wiggy.cli.get_task_by_name")
+    @patch("wiggy.cli.WiggyMCPServer")
+    @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    def test_mcp_tools_not_added_when_wildcard(
+        self,
+        _mock_bind_host: MagicMock,
+        mock_repo_cls: MagicMock,
+        mock_mcp_cls: MagicMock,
+        mock_get_task: MagicMock,
+        mock_resolve: MagicMock,
+        mock_get_executors: MagicMock,
+    ) -> None:
+        """MCP tool names are NOT added when tools is wildcard."""
+        from click.testing import CliRunner
+
+        from wiggy.cli import main
+
+        mock_spec = MagicMock()
+        mock_spec.model = None
+        mock_spec.tools = ("*",)
+        mock_spec.source = None
+        mock_get_task.return_value = mock_spec
+
+        mock_engine = MagicMock()
+        mock_engine.name = "claude"
+        mock_resolve.return_value = mock_engine
+
+        mock_repo = MagicMock()
+        mock_repo.get_result_by_task_id.return_value = None
+        mock_repo_cls.return_value = mock_repo
+
+        mock_mcp = MagicMock()
+        mock_mcp.start.return_value = 8888
+        mock_mcp_cls.return_value = mock_mcp
+
+        mock_exec = MagicMock()
+        mock_exec.exit_code = 0
+        mock_exec.run.return_value = iter([])
+        mock_get_executors.return_value = [mock_exec]
+
+        runner = CliRunner()
+        runner.invoke(main, ["task", "run", "analyse"])
+
+        call_kwargs = mock_get_executors.call_args[1]
+        assert call_kwargs["allowed_tools"] is None
+
+    @patch("wiggy.cli.get_executors")
+    @patch("wiggy.cli.resolve_engine")
+    @patch("wiggy.cli.get_task_by_name")
+    @patch("wiggy.cli.WiggyMCPServer")
+    @patch("wiggy.cli.TaskHistoryRepository")
+    @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    def test_mcp_tools_not_added_when_mcp_fails(
+        self,
+        _mock_bind_host: MagicMock,
+        mock_repo_cls: MagicMock,
+        mock_mcp_cls: MagicMock,
+        mock_get_task: MagicMock,
+        mock_resolve: MagicMock,
+        mock_get_executors: MagicMock,
+    ) -> None:
+        """MCP tool names are NOT added when MCP server fails to start."""
+        from click.testing import CliRunner
+
+        from wiggy.cli import main
+
+        mock_spec = MagicMock()
+        mock_spec.model = None
+        mock_spec.tools = ("Read", "Glob")
+        mock_spec.source = None
+        mock_get_task.return_value = mock_spec
+
+        mock_engine = MagicMock()
+        mock_engine.name = "claude"
+        mock_resolve.return_value = mock_engine
+
+        mock_repo = MagicMock()
+        mock_repo.get_result_by_task_id.return_value = None
+        mock_repo_cls.return_value = mock_repo
+
+        mock_mcp = MagicMock()
+        mock_mcp.start.side_effect = RuntimeError("bind failed")
+        mock_mcp_cls.return_value = mock_mcp
+
+        mock_exec = MagicMock()
+        mock_exec.exit_code = 0
+        mock_exec.run.return_value = iter([])
+        mock_get_executors.return_value = [mock_exec]
+
+        runner = CliRunner()
+        runner.invoke(main, ["task", "run", "docs"])
+
+        call_kwargs = mock_get_executors.call_args[1]
+        allowed = call_kwargs["allowed_tools"]
+        # Only original tools, no MCP tools
+        assert allowed == ["Read", "Glob"]
 
 
 # ── Post-Step Validation Tests ───────────────────────────────────────

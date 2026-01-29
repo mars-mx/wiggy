@@ -214,6 +214,14 @@ class DockerExecutor(Executor):
         environment = self._get_environment()
         command = self._build_command(engine, prompt)
 
+        # On Linux, host.docker.internal is not available by default.
+        # Map it to host-gateway so containers can reach the host MCP server.
+        extra_hosts = (
+            {"host.docker.internal": "host-gateway"}
+            if self._mcp_port is not None
+            else None
+        )
+
         self._container = client.containers.create(
             image=image,
             command=command,
@@ -223,6 +231,7 @@ class DockerExecutor(Executor):
             detach=True,
             volumes=volumes if volumes else None,
             environment=environment if environment else None,
+            extra_hosts=extra_hosts,
         )
 
         if not self.quiet:

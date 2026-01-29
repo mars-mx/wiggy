@@ -160,6 +160,21 @@ class TestWriteResult:
         assert "error" in data
         assert "Missing X-Wiggy-Task-ID" in data["error"]
 
+    def test_missing_task_log_returns_error(
+        self, repo: TaskHistoryRepository
+    ) -> None:
+        """write_result returns error when task_log record doesn't exist (FK constraint)."""
+        response = handle_write_result(
+            repo,
+            "nonexistent",
+            "Some result text",
+            key_files=["file.py"],
+            tags=["test"],
+        )
+        data = json.loads(response)
+        assert "error" in data
+        assert "nonexistent" in data["error"]
+
 
 # ── load_result tests ────────────────────────────────────────────────
 
@@ -299,5 +314,18 @@ class TestWiggyMCPServer:
             result = sock.connect_ex(("127.0.0.1", port))
             sock.close()
             assert result == 0
+        finally:
+            server.stop()
+
+    def test_accepts_custom_host(self, repo: TaskHistoryRepository) -> None:
+        """Server stores custom host and uses it for binding."""
+        from wiggy.mcp.server import WiggyMCPServer
+
+        server = WiggyMCPServer(repo, "proc_test", host="127.0.0.1")
+        assert server.host == "127.0.0.1"
+
+        port = server.start()
+        try:
+            assert port > 0
         finally:
             server.stop()

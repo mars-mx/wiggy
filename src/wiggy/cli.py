@@ -36,7 +36,7 @@ from wiggy.history import (
     TaskNotFoundError,
     cleanup_old_tasks,
 )
-from wiggy.mcp import WiggyMCPServer
+from wiggy.mcp import MCP_TOOL_NAMES, WiggyMCPServer, resolve_mcp_bind_host
 from wiggy.monitor import Monitor
 from wiggy.parsers.messages import MessageType, ParsedMessage
 from wiggy.runner import resolve_engine
@@ -392,11 +392,12 @@ def run(
     process_id = secrets.token_hex(4)
 
     # Start MCP server for task result storage
-    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id)
+    mcp_bind_host = resolve_mcp_bind_host()
+    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id, host=mcp_bind_host)
     mcp_port: int | None = None
     try:
         mcp_port = mcp_server.start()
-        console.print(f"[dim]MCP server started on port {mcp_port}[/dim]")
+        console.print(f"[dim]MCP server started on {mcp_bind_host}:{mcp_port}[/dim]")
     except Exception:
         logger.warning(
             "MCP server failed to start, continuing without MCP",
@@ -924,11 +925,31 @@ def task_run(
     process_id = secrets.token_hex(4)
     task_id = secrets.token_hex(4)
 
-    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id)
+    # Create task log record (required for write_result FK constraint)
+    start_time = datetime.now(UTC)
+    task_log = TaskLog(
+        task_id=task_id,
+        process_id=process_id,
+        executor_id=1,
+        created_at=start_time.isoformat(),
+        branch="main",
+        worktree=str(Path.cwd()),
+        main_repo=str(Path.cwd()),
+        engine=resolved_engine.name,
+        model=effective_model,
+        task_name=task_name,
+        prompt=prompt,
+        prompt_hash=_hash_prompt(prompt),
+        parent_id=None,
+    )
+    repo.create(task_log)
+
+    mcp_bind_host = resolve_mcp_bind_host()
+    mcp_server = WiggyMCPServer(repo=repo, process_id=process_id, host=mcp_bind_host)
     mcp_port: int | None = None
     try:
         mcp_port = mcp_server.start()
-        console.print(f"[dim]MCP server started on port {mcp_port}[/dim]")
+        console.print(f"[dim]MCP server started on {mcp_bind_host}:{mcp_port}[/dim]")
     except Exception:
         logger.warning(
             "MCP server failed to start, continuing without MCP",
@@ -943,6 +964,11 @@ def task_run(
     if mcp_port is not None:
         mcp_prompt = _build_single_task_mcp_prompt()
         extra_args = (*extra_args, "--append-system-prompt", mcp_prompt)
+
+    # When MCP is enabled and tools are restricted, add MCP tool names
+    # so Claude Code's --allowedTools whitelist doesn't block MCP tools
+    if mcp_port is not None and allowed_tools is not None:
+        allowed_tools = allowed_tools + list(MCP_TOOL_NAMES)
 
     try:
         # Create executor with task settings - mount cwd for project files
@@ -969,10 +995,27 @@ def task_run(
         finally:
             executor.teardown()
 
+        # Complete task log with results
+        end_time = datetime.now(UTC)
+        duration_ms = int((end_time - start_time).total_seconds() * 1000)
+        exit_code = executor.exit_code or 0
+        success = exit_code == 0
+        summary = executor.summary
+        repo.complete(
+            task_id,
+            success=success,
+            exit_code=exit_code,
+            finished_at=end_time.isoformat(),
+            duration_ms=duration_ms,
+            error_message=None if success else f"Exit code: {exit_code}",
+            total_cost=summary.total_cost if summary else None,
+            input_tokens=summary.input_tokens if summary else None,
+            output_tokens=summary.output_tokens if summary else None,
+        )
+
         # Post-step validation
         _check_task_result(repo, task_id, task_name)
 
-        exit_code = executor.exit_code or 0
         if exit_code != 0:
             console.print(f"[red]Task failed with exit code: {exit_code}[/red]")
             raise SystemExit(exit_code)

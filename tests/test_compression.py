@@ -72,9 +72,9 @@ class TestCompressResult:
         assert "--model" in cmd
         assert cmd[cmd.index("--model") + 1] == "haiku"
         assert "--print" in cmd
-        assert "--no-tool" in cmd
-        assert "--mcp-tool-pattern" in cmd
-        assert cmd[cmd.index("--mcp-tool-pattern") + 1] == ""
+        assert "--tools" in cmd
+        assert cmd[cmd.index("--tools") + 1] == ""
+        assert "--strict-mcp-config" in cmd
         assert "--system-prompt" in cmd
         assert cmd[cmd.index("--system-prompt") + 1] == SYSTEM_PROMPT
 

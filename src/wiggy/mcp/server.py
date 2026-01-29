@@ -10,6 +10,7 @@ from typing import Any
 
 import uvicorn
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
@@ -23,17 +24,30 @@ from wiggy.mcp.tools import (
 logger = logging.getLogger(__name__)
 
 
-def _build_mcp_app(repo: TaskHistoryRepository, process_id: str) -> FastMCP:
+def _build_mcp_app(
+    repo: TaskHistoryRepository, process_id: str, host: str = "127.0.0.1"
+) -> FastMCP:
     """Build the FastMCP application with tool registrations.
 
     Args:
         repo: The task history repository.
         process_id: The current process ID.
+        host: The bind host address, used to configure allowed Host headers.
 
     Returns:
         A configured FastMCP instance.
     """
-    mcp = FastMCP("wiggy", stateless_http=True)
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*", "host.docker.internal:*"]
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        allowed_hosts.append(f"{host}:*")
+
+    transport_security = TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=[f"http://{h}" for h in allowed_hosts],
+    )
+
+    mcp = FastMCP("wiggy", stateless_http=True, transport_security=transport_security)
 
     @mcp.tool()
     async def write_result(
@@ -113,8 +127,15 @@ def _extract_task_id(ctx: Context[Any, Any, Any]) -> str | None:
     """
     try:
         req = ctx.request_context.request
-        return req.headers.get("x-wiggy-task-id") if req else None
+        task_id = req.headers.get("x-wiggy-task-id") if req else None
+        if task_id is None:
+            logger.debug(
+                "No X-Wiggy-Task-ID header found (request=%s)",
+                type(req).__name__ if req else "None",
+            )
+        return task_id
     except (AttributeError, TypeError):
+        logger.debug("Failed to extract task_id from MCP context", exc_info=True)
         return None
 
 
@@ -125,9 +146,15 @@ class WiggyMCPServer:
     streamable HTTP transport in a background thread.
     """
 
-    def __init__(self, repo: TaskHistoryRepository, process_id: str) -> None:
+    def __init__(
+        self,
+        repo: TaskHistoryRepository,
+        process_id: str,
+        host: str = "127.0.0.1",
+    ) -> None:
         self.repo = repo
         self.process_id = process_id
+        self.host = host
         self.port: int | None = None
         self._server: uvicorn.Server | None = None
         self._thread: threading.Thread | None = None
@@ -135,9 +162,9 @@ class WiggyMCPServer:
     def start(self) -> int:
         """Start the MCP server on a free port.
 
-        Returns the port number. Binds to 127.0.0.1 only.
+        Returns the port number. Binds to ``self.host``.
         """
-        mcp_app = _build_mcp_app(self.repo, self.process_id)
+        mcp_app = _build_mcp_app(self.repo, self.process_id, self.host)
         http_app = mcp_app.streamable_http_app()
         session_mgr = mcp_app.session_manager
 
@@ -147,13 +174,13 @@ class WiggyMCPServer:
                 yield
 
         starlette_app = Starlette(
-            routes=[Mount("/mcp", app=http_app)],
+            routes=[Mount("/", app=http_app)],
             lifespan=_lifespan,
         )
 
         config = uvicorn.Config(
             app=starlette_app,
-            host="127.0.0.1",
+            host=self.host,
             port=0,
             log_level="warning",
         )
@@ -168,7 +195,7 @@ class WiggyMCPServer:
 
         # Wait for the server to bind and read the actual port
         self.port = self._wait_for_port()
-        logger.info("MCP server started on 127.0.0.1:%d", self.port)
+        logger.info("MCP server started on %s:%d", self.host, self.port)
         return self.port
 
     def _wait_for_port(self, timeout: float = 10.0) -> int:

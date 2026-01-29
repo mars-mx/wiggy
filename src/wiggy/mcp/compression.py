@@ -51,9 +51,9 @@ def compress_result(result_text: str, timeout: int = 60) -> str:
         "--model",
         "haiku",
         "--print",
-        "--no-tool",
-        "--mcp-tool-pattern",
+        "--tools",
         "",
+        "--strict-mcp-config",
         "--system-prompt",
         SYSTEM_PROMPT,
     ]
