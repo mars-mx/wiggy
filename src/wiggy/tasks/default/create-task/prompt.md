@@ -46,6 +46,11 @@ When specifying tools in task.yaml, use these exact names:
 **Best practice:** Only include tools the task actually needs. Restricting
 tools improves safety and focuses the AI on the task at hand.
 
+**MCP tools:** Tasks with `*` tools also have access to knowledge base MCP tools
+(`write_knowledge`, `get_knowledge`, `search_knowledge`, `view_knowledge_history`)
+which persist decisions and learnings across tasks. Consider mentioning these in
+the prompt if the task should read from or write to the knowledge base.
+
 ## Instructions
 
 Based on the user's goal, create a new task:
