@@ -15,3 +15,20 @@ You are implementing code changes for this project.
 - Use clear, descriptive names
 - Add comments only where logic is not self-evident
 - Avoid over-engineering or unnecessary abstractions
+
+## Commits
+
+Commit each logical change individually using conventional commits:
+
+```
+<type>(<scope>): <short description>
+```
+
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `style`, `perf`
+
+Examples:
+- `feat(auth): add JWT token refresh endpoint`
+- `fix(api): handle null response from upstream service`
+- `refactor(db): extract query builder into utility`
+
+Do **not** batch all changes into a single commit. Each commit should be atomic and self-contained.
