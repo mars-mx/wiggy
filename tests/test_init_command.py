@@ -27,9 +27,7 @@ class TestInitCommand:
         home_config.write_text("engine: claude\n")
 
         with (
-            patch(
-                "wiggy.config.loader.get_home_config_path", return_value=home_config
-            ),
+            patch("wiggy.config.loader.get_home_config_path", return_value=home_config),
             patch(
                 "wiggy.config.loader.get_local_config_path", return_value=local_config
             ),
@@ -42,15 +40,10 @@ class TestInitCommand:
     def test_init_first_time_prompts_wizard(self, tmp_path: Path) -> None:
         """Test that init prompts for wizard when no home config exists."""
         home_config = tmp_path / ".wiggy" / "config.yaml"
-        local_config = tmp_path / "project" / ".wiggy" / "config.yaml"
 
         with (
-            patch(
-                "wiggy.cli.get_home_config_path", return_value=home_config
-            ),
-            patch(
-                "wiggy.cli.home_config_exists", return_value=False
-            ),
+            patch("wiggy.cli.get_home_config_path", return_value=home_config),
+            patch("wiggy.cli.home_config_exists", return_value=False),
         ):
             runner = CliRunner()
             # Answer 'n' to skip wizard
@@ -67,18 +60,10 @@ class TestInitCommand:
         home_config.write_text("engine: claude\n")
 
         with (
-            patch(
-                "wiggy.cli.get_home_config_path", return_value=home_config
-            ),
-            patch(
-                "wiggy.cli.home_config_exists", return_value=True
-            ),
-            patch(
-                "wiggy.cli.local_config_exists", return_value=False
-            ),
-            patch(
-                "wiggy.config.loader.get_home_config_path", return_value=home_config
-            ),
+            patch("wiggy.cli.get_home_config_path", return_value=home_config),
+            patch("wiggy.cli.home_config_exists", return_value=True),
+            patch("wiggy.cli.local_config_exists", return_value=False),
+            patch("wiggy.config.loader.get_home_config_path", return_value=home_config),
             patch(
                 "wiggy.config.loader.get_local_config_path", return_value=local_config
             ),

@@ -1,7 +1,6 @@
 """Tests for task history module."""
 
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -36,7 +35,7 @@ def make_task(
 ) -> TaskLog:
     """Create a TaskLog for testing."""
     if created_at is None:
-        created_at = datetime.now(timezone.utc).isoformat()
+        created_at = datetime.now(UTC).isoformat()
     defaults = {
         "branch": "wiggy/test",
         "worktree": "/tmp/worktree",
@@ -183,9 +182,7 @@ class TestTaskHistoryRepository:
         for i in range(5):
             task = make_task(
                 task_id=f"task{i:04d}",
-                created_at=(
-                    datetime.now(timezone.utc) + timedelta(seconds=i)
-                ).isoformat(),
+                created_at=(datetime.now(UTC) + timedelta(seconds=i)).isoformat(),
             )
             repo.create(task)
 
@@ -284,10 +281,12 @@ class TestTaskHistoryRepository:
 class TestCleanup:
     """Tests for cleanup utilities."""
 
-    def test_cleanup_old_tasks(self, repo: TaskHistoryRepository, tmp_path: Path) -> None:
+    def test_cleanup_old_tasks(
+        self, repo: TaskHistoryRepository, tmp_path: Path
+    ) -> None:
         """Test cleaning up old tasks."""
-        old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
-        new_date = datetime.now(timezone.utc).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=60)).isoformat()
+        new_date = datetime.now(UTC).isoformat()
 
         old_task = make_task(task_id="oldtask1", created_at=old_date)
         new_task = make_task(task_id="newtask1", created_at=new_date)
@@ -317,7 +316,7 @@ class TestCleanup:
 
     def test_cleanup_dry_run(self, repo: TaskHistoryRepository) -> None:
         """Test cleanup dry run doesn't delete."""
-        old_date = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+        old_date = (datetime.now(UTC) - timedelta(days=60)).isoformat()
         old_task = make_task(task_id="oldtask1", created_at=old_date)
         repo.create(old_task)
 
@@ -333,9 +332,9 @@ class TestSchemaMigration:
 
     def test_fresh_install_sets_version(self, temp_db: Path) -> None:
         """Test that fresh install sets schema version."""
-        from wiggy.history.schema import get_schema_version, SCHEMA_VERSION
+        from wiggy.history.schema import SCHEMA_VERSION, get_schema_version
 
-        repo = TaskHistoryRepository(db_path=temp_db)
+        TaskHistoryRepository(db_path=temp_db)
 
         import sqlite3
 
@@ -502,9 +501,7 @@ class TestTaskResult:
     ) -> None:
         """Verify global fallback when no process match."""
         # Create a task in a different process
-        task = make_task(
-            task_id="task0001", process_id="proc_old", task_name="build"
-        )
+        task = make_task(task_id="task0001", process_id="proc_old", task_name="build")
         repo.create(task)
         repo.create_result("task0001", result_text="Build succeeded")
 

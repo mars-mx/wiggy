@@ -49,10 +49,12 @@ def handle_write_result(
             "FK constraint failed for task_id=%s — no task_log record exists",
             task_id,
         )
-        return json.dumps({
-            "error": f"Task '{task_id}' not found in task_log. "
-            "The task may not have been registered before execution."
-        })
+        return json.dumps(
+            {
+                "error": f"Task '{task_id}' not found in task_log. "
+                "The task may not have been registered before execution."
+            }
+        )
 
     summary_preview = "Compression skipped"
     if is_compression_available():
@@ -205,9 +207,7 @@ def handle_write_artifact(
 
     if fmt not in VALID_FORMATS:
         valid = ", ".join(sorted(VALID_FORMATS))
-        return json.dumps({
-            "error": f"Invalid format '{fmt}'. Must be one of: {valid}"
-        })
+        return json.dumps({"error": f"Invalid format '{fmt}'. Must be one of: {valid}"})
 
     try:
         artifact = repo.create_artifact(
@@ -223,10 +223,12 @@ def handle_write_artifact(
             "FK constraint failed for task_id=%s — no task_log record exists",
             task_id,
         )
-        return json.dumps({
-            "error": f"Task '{task_id}' not found in task_log. "
-            "The task may not have been registered before execution."
-        })
+        return json.dumps(
+            {
+                "error": f"Task '{task_id}' not found in task_log. "
+                "The task may not have been registered before execution."
+            }
+        )
 
     response: dict[str, Any] = {
         "status": "ok",
@@ -292,15 +294,17 @@ def handle_list_artifacts(
 
     items: list[dict[str, Any]] = []
     for a in artifacts:
-        items.append({
-            "id": a.id,
-            "task_id": a.task_id,
-            "title": a.title,
-            "format": a.format,
-            "template_name": a.template_name,
-            "tags": list(a.tags),
-            "created_at": a.created_at,
-        })
+        items.append(
+            {
+                "id": a.id,
+                "task_id": a.task_id,
+                "title": a.title,
+                "format": a.format,
+                "template_name": a.template_name,
+                "tags": list(a.tags),
+                "created_at": a.created_at,
+            }
+        )
 
     return json.dumps({"artifacts": items})
 
@@ -317,12 +321,14 @@ def handle_list_artifact_templates() -> str:
 
     items: list[dict[str, Any]] = []
     for _name, tmpl in sorted(templates.items()):
-        items.append({
-            "name": tmpl.name,
-            "description": tmpl.description,
-            "format": tmpl.format,
-            "tags": list(tmpl.tags),
-        })
+        items.append(
+            {
+                "name": tmpl.name,
+                "description": tmpl.description,
+                "format": tmpl.format,
+                "tags": list(tmpl.tags),
+            }
+        )
 
     return json.dumps({"templates": items})
 
@@ -350,5 +356,138 @@ def handle_load_artifact_template(
         "format": tmpl.format,
         "content": tmpl.content,
         "tags": list(tmpl.tags),
+    }
+    return json.dumps(response)
+
+
+def handle_write_knowledge(
+    repo: TaskHistoryRepository,
+    key: str,
+    content: str,
+    reason: str,
+) -> str:
+    """Handle the write_knowledge MCP tool call.
+
+    Writes a new version of a knowledge entry.
+
+    Args:
+        repo: The task history repository.
+        key: The knowledge key (e.g. 'api-design-decisions').
+        content: The knowledge content.
+        reason: Why this version was created.
+
+    Returns:
+        JSON string with status, key, version, and created_at.
+    """
+    knowledge = repo.write_knowledge(key, content, reason)
+    response: dict[str, Any] = {
+        "status": "ok",
+        "key": knowledge.key,
+        "version": knowledge.version,
+        "created_at": knowledge.created_at,
+    }
+    return json.dumps(response)
+
+
+def handle_get_knowledge(
+    repo: TaskHistoryRepository,
+    key: str,
+    version: int | None = None,
+) -> str:
+    """Handle the get_knowledge MCP tool call.
+
+    Gets a knowledge entry by key, optionally at a specific version.
+
+    Args:
+        repo: The task history repository.
+        key: The knowledge key to look up.
+        version: Optional version number. Defaults to latest.
+
+    Returns:
+        JSON string with the knowledge entry or an error.
+    """
+    knowledge = repo.get_knowledge(key, version)
+    if knowledge is None:
+        lookup = f"{key} v{version}" if version else key
+        return json.dumps({"error": f"Knowledge entry '{lookup}' not found."})
+
+    response: dict[str, Any] = {
+        "key": knowledge.key,
+        "version": knowledge.version,
+        "content": knowledge.content,
+        "reason": knowledge.reason,
+        "created_at": knowledge.created_at,
+    }
+    return json.dumps(response)
+
+
+def handle_view_knowledge_history(
+    repo: TaskHistoryRepository,
+    key: str,
+) -> str:
+    """Handle the view_knowledge_history MCP tool call.
+
+    Lists all versions of a knowledge entry.
+
+    Args:
+        repo: The task history repository.
+        key: The knowledge key to look up.
+
+    Returns:
+        JSON string with the key and list of versions.
+    """
+    entries = repo.get_knowledge_history(key)
+    versions: list[dict[str, Any]] = []
+    for entry in entries:
+        versions.append(
+            {
+                "version": entry.version,
+                "reason": entry.reason,
+                "created_at": entry.created_at,
+                "content_preview": entry.content[:200],
+            }
+        )
+
+    return json.dumps({"key": key, "versions": versions})
+
+
+def handle_search_knowledge(
+    repo: TaskHistoryRepository,
+    query: str,
+    page: int = 1,
+) -> str:
+    """Handle the search_knowledge MCP tool call.
+
+    Searches knowledge, results, and artifacts by semantic similarity.
+
+    Args:
+        repo: The task history repository.
+        query: The search query.
+        page: Page number (1-based). Defaults to 1.
+
+    Returns:
+        JSON string with query, page, results, and has_more flag.
+    """
+    page_size = 10
+    results = repo.search_similar(query, page, page_size)
+
+    items: list[dict[str, Any]] = []
+    for r in results:
+        items.append(
+            {
+                "source": r.source,
+                "source_id": r.source_id,
+                "title": r.title,
+                "snippet": r.snippet,
+                "distance": r.distance,
+                "created_at": r.created_at,
+            }
+        )
+
+    response: dict[str, Any] = {
+        "query": query,
+        "page": page,
+        "results": items,
+        "has_more": len(results) == page_size,
     }
     return json.dumps(response)

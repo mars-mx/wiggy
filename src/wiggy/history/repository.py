@@ -2,11 +2,18 @@
 
 import json
 import sqlite3
+import struct
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wiggy.history.models import Artifact, TaskLog, TaskResult
+from wiggy.history.embeddings import EmbeddingProvider, get_provider
+from wiggy.history.models import Artifact, Knowledge, SearchResult, TaskLog, TaskResult
 from wiggy.history.schema import migrate_if_needed
+
+
+def _serialize_vec(vector: list[float]) -> bytes:
+    """Serialize a float vector to bytes for sqlite-vec storage."""
+    return struct.pack(f"{len(vector)}f", *vector)
 
 
 class TaskNotFoundError(Exception):
@@ -21,15 +28,24 @@ class TaskNotFoundError(Exception):
 class TaskHistoryRepository:
     """Repository for task history operations."""
 
-    def __init__(self, db_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | None = None,
+        embedding_provider: str = "fastembed",
+        embedding_model: str | None = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             db_path: Path to the SQLite database. Defaults to .wiggy/history.db
+            embedding_provider: Name of the embedding provider to use.
+            embedding_model: Optional model override for the provider.
         """
         if db_path is None:
             db_path = Path.cwd() / ".wiggy" / "history.db"
         self.db_path = db_path
+        self._embedding_provider = embedding_provider
+        self._embedding_model = embedding_model
         self._ensure_db()
 
     def _ensure_db(self) -> None:
@@ -39,9 +55,14 @@ class TaskHistoryRepository:
             migrate_if_needed(conn)
 
     def _connect(self) -> sqlite3.Connection:
-        """Create a database connection with row factory."""
+        """Create a database connection with row factory and sqlite-vec."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        conn.enable_load_extension(True)
+        import sqlite_vec
+
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
@@ -299,6 +320,7 @@ class TaskHistoryRepository:
                 ),
             )
             conn.commit()
+        self._embed_result(task_id, result_text)
 
     def update_summary(self, task_id: str, summary_text: str) -> None:
         """Store the compressed summary and set has_summary = 1."""
@@ -436,6 +458,8 @@ class TaskHistoryRepository:
             )
             conn.commit()
 
+        self._embed_artifact(artifact_id, content)
+
         return Artifact(
             id=artifact_id,
             task_id=task_id,
@@ -450,9 +474,7 @@ class TaskHistoryRepository:
     def get_artifact_by_id(self, artifact_id: str) -> Artifact | None:
         """Get an artifact by its ID."""
         with self._connect() as conn:
-            cursor = conn.execute(
-                "SELECT * FROM artifact WHERE id = ?", (artifact_id,)
-            )
+            cursor = conn.execute("SELECT * FROM artifact WHERE id = ?", (artifact_id,))
             row = cursor.fetchone()
             return Artifact.from_row(row) if row else None
 
@@ -479,3 +501,212 @@ class TaskHistoryRepository:
                 (process_id,),
             )
             return [Artifact.from_row(row) for row in cursor.fetchall()]
+
+    # Knowledge CRUD operations
+
+    def write_knowledge(self, key: str, content: str, reason: str) -> Knowledge:
+        """Write a new version of a knowledge entry.
+
+        Automatically increments the version number for the given key.
+        """
+        created_at = datetime.now(UTC).isoformat()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM knowledge WHERE key = ?",
+                (key,),
+            )
+            next_version: int = cursor.fetchone()[0] + 1
+            conn.execute(
+                """
+                INSERT INTO knowledge (key, version, content, reason, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (key, next_version, content, reason, created_at),
+            )
+            row_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.commit()
+
+        self._embed_knowledge(row_id, content)
+
+        return Knowledge(
+            id=row_id,
+            key=key,
+            version=next_version,
+            content=content,
+            reason=reason,
+            created_at=created_at,
+        )
+
+    def get_knowledge(self, key: str, version: int | None = None) -> Knowledge | None:
+        """Get a knowledge entry by key, optionally at a specific version.
+
+        If version is None, returns the latest version.
+        """
+        with self._connect() as conn:
+            if version is None:
+                cursor = conn.execute(
+                    "SELECT * FROM knowledge WHERE key = ? "
+                    "ORDER BY version DESC LIMIT 1",
+                    (key,),
+                )
+            else:
+                cursor = conn.execute(
+                    "SELECT * FROM knowledge WHERE key = ? AND version = ?",
+                    (key, version),
+                )
+            row = cursor.fetchone()
+            return Knowledge.from_row(row) if row else None
+
+    def get_knowledge_history(self, key: str) -> list[Knowledge]:
+        """Get all versions of a knowledge entry, ordered by version ascending."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM knowledge WHERE key = ? ORDER BY version ASC",
+                (key,),
+            )
+            return [Knowledge.from_row(row) for row in cursor.fetchall()]
+
+    # Private embedding methods
+
+    def _get_provider(self) -> EmbeddingProvider:
+        """Get the embedding provider (lazily created)."""
+        return get_provider(self._embedding_provider, self._embedding_model)
+
+    def _embed_knowledge(self, knowledge_id: int, content: str) -> None:
+        """Embed knowledge content and store in vec_knowledge."""
+        vector = self._get_provider().embed_text(content)
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO vec_knowledge (rowid, embedding) VALUES (?, ?)",
+                (knowledge_id, _serialize_vec(vector)),
+            )
+            conn.commit()
+
+    def _embed_result(self, task_id: str, content: str) -> None:
+        """Embed result content and store in vec_results."""
+        vector = self._get_provider().embed_text(content)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT rowid FROM task_result WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            if row is None:
+                return
+            conn.execute(
+                "INSERT OR REPLACE INTO vec_results (rowid, embedding)"
+                " VALUES (?, ?)",
+                (row[0], _serialize_vec(vector)),
+            )
+            conn.commit()
+
+    def _embed_artifact(self, artifact_id: str, content: str) -> None:
+        """Embed artifact content and store in vec_artifacts."""
+        vector = self._get_provider().embed_text(content)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT rowid FROM artifact WHERE id = ?",
+                (artifact_id,),
+            ).fetchone()
+            if row is None:
+                return
+            conn.execute(
+                "INSERT OR REPLACE INTO vec_artifacts (rowid, embedding)"
+                " VALUES (?, ?)",
+                (row[0], _serialize_vec(vector)),
+            )
+            conn.commit()
+
+    # Similarity search
+
+    def search_similar(
+        self, query: str, page: int = 1, page_size: int = 10
+    ) -> list[SearchResult]:
+        """Search across knowledge, results, and artifacts by semantic similarity.
+
+        Returns results sorted by distance, paginated.
+        """
+        provider = self._get_provider()
+        query_vec = _serialize_vec(provider.embed_text(query))
+        limit = page * page_size  # fetch enough to paginate after merge
+
+        results: list[SearchResult] = []
+
+        with self._connect() as conn:
+            # Search knowledge (deduplicate to latest version per key)
+            cursor = conn.execute(
+                """
+                SELECT k.id, k.key, k.version, k.content, k.created_at, v.distance
+                FROM vec_knowledge v
+                JOIN knowledge k ON k.id = v.rowid
+                WHERE v.embedding MATCH ? AND k = ?
+                ORDER BY v.distance
+                """,
+                (query_vec, limit),
+            )
+            seen_keys: dict[str, SearchResult] = {}
+            for row in cursor.fetchall():
+                key = row["key"]
+                if key not in seen_keys:
+                    snippet = row["content"][:200]
+                    seen_keys[key] = SearchResult(
+                        source="knowledge",
+                        source_id=str(row["id"]),
+                        title=key,
+                        snippet=snippet,
+                        distance=row["distance"],
+                        created_at=row["created_at"],
+                    )
+            results.extend(seen_keys.values())
+
+            # Search results
+            cursor = conn.execute(
+                """
+                SELECT tr.task_id, tr.result_text, tr.created_at, v.distance
+                FROM vec_results v
+                JOIN task_result tr ON tr.rowid = v.rowid
+                WHERE v.embedding MATCH ? AND k = ?
+                ORDER BY v.distance
+                """,
+                (query_vec, limit),
+            )
+            for row in cursor.fetchall():
+                snippet = row["result_text"][:200]
+                results.append(
+                    SearchResult(
+                        source="result",
+                        source_id=row["task_id"],
+                        title=f"Result for {row['task_id']}",
+                        snippet=snippet,
+                        distance=row["distance"],
+                        created_at=row["created_at"],
+                    )
+                )
+
+            # Search artifacts
+            cursor = conn.execute(
+                """
+                SELECT a.id, a.title, a.content, a.created_at, v.distance
+                FROM vec_artifacts v
+                JOIN artifact a ON a.rowid = v.rowid
+                WHERE v.embedding MATCH ? AND k = ?
+                ORDER BY v.distance
+                """,
+                (query_vec, limit),
+            )
+            for row in cursor.fetchall():
+                snippet = row["content"][:200]
+                results.append(
+                    SearchResult(
+                        source="artifact",
+                        source_id=row["id"],
+                        title=row["title"],
+                        snippet=snippet,
+                        distance=row["distance"],
+                        created_at=row["created_at"],
+                    )
+                )
+
+        # Sort all results by distance and paginate
+        results.sort(key=lambda r: r.distance)
+        offset = (page - 1) * page_size
+        return results[offset : offset + page_size]

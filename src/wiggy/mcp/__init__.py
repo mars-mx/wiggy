@@ -16,6 +16,10 @@ MCP_TOOL_NAMES: tuple[str, ...] = (
     "mcp__wiggy__list_artifacts",
     "mcp__wiggy__list_artifact_templates",
     "mcp__wiggy__load_artifact_template",
+    "mcp__wiggy__write_knowledge",
+    "mcp__wiggy__get_knowledge",
+    "mcp__wiggy__view_knowledge_history",
+    "mcp__wiggy__search_knowledge",
 )
 
 __all__ = [

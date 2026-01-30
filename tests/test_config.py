@@ -3,7 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 import yaml
 
 from wiggy.config.loader import (
@@ -191,9 +190,7 @@ class TestConfigMerging:
         local_config = tmp_path / "local" / ".wiggy" / "config.yaml"
 
         with (
-            patch(
-                "wiggy.config.loader.get_home_config_path", return_value=home_config
-            ),
+            patch("wiggy.config.loader.get_home_config_path", return_value=home_config),
             patch(
                 "wiggy.config.loader.get_local_config_path", return_value=local_config
             ),
@@ -214,9 +211,7 @@ class TestConfigMerging:
         home_config.write_text("engine: claude\nparallel: 2\n")
 
         with (
-            patch(
-                "wiggy.config.loader.get_home_config_path", return_value=home_config
-            ),
+            patch("wiggy.config.loader.get_home_config_path", return_value=home_config),
             patch(
                 "wiggy.config.loader.get_local_config_path", return_value=local_config
             ),
@@ -240,9 +235,7 @@ class TestConfigMerging:
         local_config.write_text("parallel: 8\n")  # Override parallel only
 
         with (
-            patch(
-                "wiggy.config.loader.get_home_config_path", return_value=home_config
-            ),
+            patch("wiggy.config.loader.get_home_config_path", return_value=home_config),
             patch(
                 "wiggy.config.loader.get_local_config_path", return_value=local_config
             ),

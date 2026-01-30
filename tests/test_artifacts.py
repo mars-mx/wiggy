@@ -1,8 +1,7 @@
 """Tests for artifacts and artifact templates."""
 
 import json
-import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -45,7 +44,7 @@ def make_task(
 ) -> TaskLog:
     """Create a TaskLog for testing."""
     defaults = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "branch": "wiggy/test",
         "worktree": "/tmp/worktree",
         "main_repo": "/home/user/project",
@@ -145,7 +144,8 @@ class TestTemplateLoader:
         tmpl_dir = tmp_path / "custom"
         tmpl_dir.mkdir()
         (tmpl_dir / "template.yaml").write_text(
-            "name: custom\ndescription: Custom template\nformat: json\ntags:\n  - test\n"
+            "name: custom\ndescription: Custom template\n"
+            "format: json\ntags:\n  - test\n"
         )
         (tmpl_dir / "content.json").write_text('{"key": "value"}')
 
@@ -270,9 +270,7 @@ class TestArtifactRepository:
         titles = {a.title for a in artifacts}
         assert titles == {"Doc 1", "Doc 2"}
 
-    def test_get_artifacts_by_task_id_empty(
-        self, repo: TaskHistoryRepository
-    ) -> None:
+    def test_get_artifacts_by_task_id_empty(self, repo: TaskHistoryRepository) -> None:
         """Test empty list for task with no artifacts."""
         task = make_task()
         repo.create(task)
@@ -315,9 +313,9 @@ class TestArtifactRepository:
 class TestSchemaVersion:
     """Test schema version is correct after adding artifact table."""
 
-    def test_schema_version_is_3(self) -> None:
-        """Test that SCHEMA_VERSION is 3."""
-        assert SCHEMA_VERSION == 3
+    def test_schema_version_is_4(self) -> None:
+        """Test that SCHEMA_VERSION is 4."""
+        assert SCHEMA_VERSION == 4
 
     def test_fresh_install_has_artifact_table(self, tmp_path: Path) -> None:
         """Test that fresh database includes the artifact table."""
@@ -335,8 +333,8 @@ class TestSchemaVersion:
 
         assert "artifact" in tables
 
-    def test_migration_v2_to_v3(self, tmp_path: Path) -> None:
-        """Test migrating a v2 database to v3 adds the artifact table."""
+    def test_migration_v2_to_v4(self, tmp_path: Path) -> None:
+        """Test migrating a v2 database to v4 adds the artifact table."""
         import sqlite3
 
         from wiggy.history.schema import SCHEMA_SQL, get_schema_version
@@ -359,10 +357,11 @@ class TestSchemaVersion:
 
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifact'"
+            "SELECT name FROM sqlite_master"
+            " WHERE type='table' AND name='artifact'"
         )
         assert cursor.fetchone() is not None
-        assert get_schema_version(conn) == 3
+        assert get_schema_version(conn) == SCHEMA_VERSION
         conn.close()
 
 
@@ -432,26 +431,18 @@ class TestMCPArtifactHandlers:
         assert result["content"] == "Hello"
         assert result["format"] == "markdown"
 
-    def test_handle_load_artifact_not_found(
-        self, repo: TaskHistoryRepository
-    ) -> None:
+    def test_handle_load_artifact_not_found(self, repo: TaskHistoryRepository) -> None:
         """Test loading nonexistent artifact returns error."""
         result = json.loads(handle_load_artifact(repo, "nonexistent"))
         assert "error" in result
 
-    def test_handle_list_artifacts_by_task(
-        self, repo: TaskHistoryRepository
-    ) -> None:
+    def test_handle_list_artifacts_by_task(self, repo: TaskHistoryRepository) -> None:
         """Test listing artifacts for a specific task."""
         task = make_task()
         repo.create(task)
 
-        repo.create_artifact(
-            task_id="abcd1234", title="A1", content="C1", fmt="text"
-        )
-        repo.create_artifact(
-            task_id="abcd1234", title="A2", content="C2", fmt="text"
-        )
+        repo.create_artifact(task_id="abcd1234", title="A1", content="C1", fmt="text")
+        repo.create_artifact(task_id="abcd1234", title="A2", content="C2", fmt="text")
 
         result = json.loads(
             handle_list_artifacts(repo, process_id="proc5678", task_id="abcd1234")
@@ -482,7 +473,9 @@ class TestMCPArtifactHandlers:
 class TestMCPTemplateHandlers:
     """Tests for MCP tool handler functions for templates."""
 
-    def test_handle_list_artifact_templates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_handle_list_artifact_templates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test listing available templates."""
         # Point global path to package defaults so templates are discovered
         monkeypatch.setattr(
@@ -503,7 +496,9 @@ class TestMCPTemplateHandlers:
         assert "prd" in names
         assert "documentation" in names
 
-    def test_handle_load_artifact_template(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_handle_load_artifact_template(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test loading a specific template."""
         pkg_path = get_package_templates_path()
         monkeypatch.setattr(

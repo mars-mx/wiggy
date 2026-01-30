@@ -6,6 +6,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Literal, cast
 
 ExecutorType = Literal["docker", "shell"]
+EmbeddingProviderType = Literal["fastembed", "sentence-transformers", "openai"]
 
 
 @dataclass
@@ -34,6 +35,10 @@ class WiggyConfig:
     pr: bool | None = None
     remote: str | None = None
 
+    # Embedding settings
+    embedding_provider: EmbeddingProviderType | None = None
+    embedding_model: str | None = None
+
     def merge(self, other: WiggyConfig) -> WiggyConfig:
         """Merge another config into this one.
 
@@ -59,6 +64,16 @@ class WiggyConfig:
             push=other.push if other.push is not None else self.push,
             pr=other.pr if other.pr is not None else self.pr,
             remote=other.remote if other.remote is not None else self.remote,
+            embedding_provider=(
+                other.embedding_provider
+                if other.embedding_provider is not None
+                else self.embedding_provider
+            ),
+            embedding_model=(
+                other.embedding_model
+                if other.embedding_model is not None
+                else self.embedding_model
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -98,6 +113,11 @@ class WiggyConfig:
         pr_raw = data.get("pr")
         pr = bool(pr_raw) if pr_raw is not None else None
         remote = data.get("remote")
+        embedding_provider_raw = data.get("embedding_provider")
+        embedding_provider: EmbeddingProviderType | None = None
+        if embedding_provider_raw in ("fastembed", "sentence-transformers", "openai"):
+            embedding_provider = cast(EmbeddingProviderType, embedding_provider_raw)
+        embedding_model = data.get("embedding_model")
 
         return cls(
             engine=engine,
@@ -110,6 +130,8 @@ class WiggyConfig:
             push=push,
             pr=pr,
             remote=remote,
+            embedding_provider=embedding_provider,
+            embedding_model=embedding_model,
         )
 
 
@@ -121,4 +143,5 @@ DEFAULT_CONFIG = WiggyConfig(
     push=True,
     pr=True,
     remote="origin",
+    embedding_provider="fastembed",
 )

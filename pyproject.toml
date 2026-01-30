@@ -28,15 +28,20 @@ dependencies = [
     "mcp>=1.0",
     "pyyaml>=6.0",
     "rich>=13.0",
+    "sqlite-vec>=0.1",
 ]
 
 [project.optional-dependencies]
+embeddings-fastembed = ["fastembed>=0.4"]
+embeddings-sentence-transformers = ["sentence-transformers>=3.0"]
+embeddings-openai = ["openai>=1.0"]
 dev = [
     "mypy>=1.10",
     "pytest>=8.0",
     "ruff>=0.4",
     "types-docker>=7.0",
     "types-PyYAML>=6.0",
+    "fastembed>=0.4",
 ]
 
 [project.scripts]
@@ -74,6 +79,10 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["fastembed", "sqlite_vec", "sentence_transformers"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

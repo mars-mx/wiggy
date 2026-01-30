@@ -16,13 +16,17 @@ from starlette.routing import Mount
 
 from wiggy.history.repository import TaskHistoryRepository
 from wiggy.mcp.tools import (
+    handle_get_knowledge,
     handle_list_artifact_templates,
     handle_list_artifacts,
     handle_load_artifact,
     handle_load_artifact_template,
     handle_load_result,
     handle_read_result_summary,
+    handle_search_knowledge,
+    handle_view_knowledge_history,
     handle_write_artifact,
+    handle_write_knowledge,
     handle_write_result,
 )
 
@@ -209,6 +213,83 @@ def _build_mcp_app(
             template_name: Name of the template to load.
         """
         return handle_load_artifact_template(template_name)
+
+    @mcp.tool()
+    async def write_knowledge(
+        ctx: Context[Any, Any, Any],
+        key: str,
+        content: str,
+        reason: str,
+    ) -> str:
+        """Write a new version of a knowledge entry.
+
+        Stores persistent knowledge that spans across tasks and processes.
+        Each write creates a new version under the given key, preserving
+        history. Use descriptive keys like 'api-design-decisions' or
+        'deployment-checklist'.
+
+        Args:
+            ctx: MCP context.
+            key: The knowledge key (e.g. 'api-design-decisions').
+            content: The knowledge content to store.
+            reason: Why this version was created (e.g. 'added auth section').
+        """
+        return handle_write_knowledge(repo, key, content, reason)
+
+    @mcp.tool()
+    async def get_knowledge(
+        ctx: Context[Any, Any, Any],
+        key: str,
+        version: int | None = None,
+    ) -> str:
+        """Get a knowledge entry by key.
+
+        Returns the content, version, reason, and timestamp. By default
+        returns the latest version. Specify a version number to retrieve
+        an older revision.
+
+        Args:
+            ctx: MCP context.
+            key: The knowledge key to look up.
+            version: Optional version number. Defaults to latest.
+        """
+        return handle_get_knowledge(repo, key, version)
+
+    @mcp.tool()
+    async def view_knowledge_history(
+        ctx: Context[Any, Any, Any],
+        key: str,
+    ) -> str:
+        """View all versions of a knowledge entry.
+
+        Returns a list of versions with their reasons, timestamps, and
+        content previews. Use get_knowledge with a specific version
+        number to retrieve the full content of an older revision.
+
+        Args:
+            ctx: MCP context.
+            key: The knowledge key to look up.
+        """
+        return handle_view_knowledge_history(repo, key)
+
+    @mcp.tool()
+    async def search_knowledge(
+        ctx: Context[Any, Any, Any],
+        query: str,
+        page: int = 1,
+    ) -> str:
+        """Search knowledge, results, and artifacts by semantic similarity.
+
+        Returns ranked results across all stored content. Each result
+        includes a snippet preview and distance score (lower = more
+        relevant). Results are paginated with 10 items per page.
+
+        Args:
+            ctx: MCP context.
+            query: The search query text.
+            page: Page number (1-based). Defaults to 1.
+        """
+        return handle_search_knowledge(repo, query, page)
 
     return mcp
 

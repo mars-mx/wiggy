@@ -173,3 +173,39 @@ class Artifact:
             created_at=row["created_at"],
             template_name=row["template_name"],
         )
+
+
+@dataclass(frozen=True)
+class Knowledge:
+    """Immutable record of a knowledge entry."""
+
+    id: int  # Auto-increment PK
+    key: str  # Logical key (e.g. "api-design-decisions")
+    version: int  # 1-based version index
+    content: str
+    reason: str  # Why this version was created
+    created_at: str  # ISO8601 UTC
+
+    @classmethod
+    def from_row(cls, row: Row) -> Self:
+        """Create a Knowledge from a database row."""
+        return cls(
+            id=row["id"],
+            key=row["key"],
+            version=row["version"],
+            content=row["content"],
+            reason=row["reason"],
+            created_at=row["created_at"],
+        )
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    """Immutable record of a search result."""
+
+    source: str  # 'knowledge', 'result', or 'artifact'
+    source_id: str  # ID of the source record
+    title: str  # Display title
+    snippet: str  # First ~200 chars of content
+    distance: float  # Cosine distance (lower = more similar)
+    created_at: str

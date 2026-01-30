@@ -160,10 +160,8 @@ class TestWriteResult:
         assert "error" in data
         assert "Missing X-Wiggy-Task-ID" in data["error"]
 
-    def test_missing_task_log_returns_error(
-        self, repo: TaskHistoryRepository
-    ) -> None:
-        """write_result returns error when task_log record doesn't exist (FK constraint)."""
+    def test_missing_task_log_returns_error(self, repo: TaskHistoryRepository) -> None:
+        """write_result returns error when task_log record doesn't exist."""
         response = handle_write_result(
             repo,
             "nonexistent",

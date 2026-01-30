@@ -1,7 +1,7 @@
 """Runner for the wiggy loop with engine validation."""
 
 from wiggy.console import console
-from wiggy.engines import Engine, ENGINES, get_available_engines, get_engine_by_name
+from wiggy.engines import ENGINES, Engine, get_available_engines, get_engine_by_name
 
 
 def resolve_engine(engine_name: str | None) -> Engine | None:
@@ -18,7 +18,8 @@ def resolve_engine(engine_name: str | None) -> Engine | None:
         engine = get_engine_by_name(engine_name)
         if engine is None:
             console.print(f"[red]Unknown engine: {engine_name}[/red]")
-            console.print("Available engines: " + ", ".join(e.cli_command for e in ENGINES))
+            names = ", ".join(e.cli_command for e in ENGINES)
+            console.print(f"Available engines: {names}")
             return None
         if not engine.is_installed():
             console.print(f"[red]Engine '{engine.name}' is not installed.[/red]")
@@ -42,7 +43,9 @@ def resolve_engine(engine_name: str | None) -> Engine | None:
         return engine
 
     # Multiple engines - user must choose
-    console.print("[red]Multiple engines installed. Please specify one with --engine.[/red]")
+    console.print(
+        "[red]Multiple engines installed. Please specify one with --engine.[/red]"
+    )
     console.print("Available engines:")
     for engine in available:
         console.print(f"  - {engine.cli_command} ({engine.name})")

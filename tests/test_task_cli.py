@@ -60,7 +60,8 @@ def test_task_list_verbose(tmp_path: Path) -> None:
     task_dir = tmp_path / ".wiggy" / "tasks" / "test-task"
     task_dir.mkdir(parents=True)
     (task_dir / "task.yaml").write_text(
-        "name: test-task\ndescription: A detailed description\ntools:\n  - Read\n  - Write"
+        "name: test-task\ndescription: A detailed description\n"
+        "tools:\n  - Read\n  - Write"
     )
     (task_dir / "prompt.md").write_text("# Test prompt")
 

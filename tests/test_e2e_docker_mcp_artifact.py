@@ -2,7 +2,7 @@
 
 import json
 import textwrap
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import docker
@@ -137,7 +137,7 @@ class TestDockerMCPEndToEnd:
             task_id=task_id,
             process_id=process_id,
             executor_id=1,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             branch="wiggy/e2e-mcp-test",
             worktree=str(tmp_path),
             main_repo=str(tmp_path),
@@ -147,9 +147,7 @@ class TestDockerMCPEndToEnd:
 
         # --- Start MCP server on Docker-reachable host ---
         bind_host = resolve_mcp_bind_host()
-        mcp_server = WiggyMCPServer(
-            repo=repo, process_id=process_id, host=bind_host
-        )
+        mcp_server = WiggyMCPServer(repo=repo, process_id=process_id, host=bind_host)
         mcp_port = mcp_server.start()
         assert mcp_port > 0
 

@@ -84,7 +84,8 @@ def test_resolve_image_engine_default(test_engine) -> None:
 def test_resolve_image_fallback(test_engine_no_image) -> None:
     """Test fallback to base image when no engine image."""
     executor = DockerExecutor()
-    assert executor._resolve_image(test_engine_no_image) == "ghcr.io/mars-mx/wiggy-base:latest"
+    expected = "ghcr.io/mars-mx/wiggy-base:latest"
+    assert executor._resolve_image(test_engine_no_image) == expected
 
 
 def test_setup_creates_container(mock_docker_client, test_engine) -> None:
@@ -172,10 +173,8 @@ def test_mcp_environment_variables(mock_docker_client, test_engine_with_mcp) -> 
     assert env["WIGGY_TASK_ID"] == "abcd1234"
 
 
-def test_mcp_config_mounted(
-    mock_docker_client, test_engine_with_mcp, tmp_path
-) -> None:
-    """Test the MCP config file is in the volume mounts at the correct container path."""
+def test_mcp_config_mounted(mock_docker_client, test_engine_with_mcp, tmp_path) -> None:
+    """Test MCP config is in volume mounts at the correct container path."""
     mock_container = MagicMock()
     mock_container.short_id = "abc123"
     mock_docker_client.containers.create.return_value = mock_container
@@ -192,10 +191,8 @@ def test_mcp_config_mounted(
     assert volumes[config_host_path]["mode"] == "ro"
 
 
-def test_mcp_config_flag_injected(
-    mock_docker_client, test_engine_with_mcp
-) -> None:
-    """Test --mcp-config flag is in the command when mcp_port is set and engine has mcp_support."""
+def test_mcp_config_flag_injected(mock_docker_client, test_engine_with_mcp) -> None:
+    """Test --mcp-config flag is in command when mcp_port is set."""
     mock_container = MagicMock()
     mock_container.short_id = "abc123"
     mock_docker_client.containers.create.return_value = mock_container
@@ -226,10 +223,8 @@ def test_mcp_config_flag_not_injected_without_support(
     assert "--mcp-config" not in command
 
 
-def test_mcp_config_content(
-    mock_docker_client, test_engine_with_mcp, tmp_path
-) -> None:
-    """Test the written config file content matches the MCP template with placeholders."""
+def test_mcp_config_content(mock_docker_client, test_engine_with_mcp, tmp_path) -> None:
+    """Test written config file content matches the MCP template."""
     mock_container = MagicMock()
     mock_container.short_id = "abc123"
     mock_docker_client.containers.create.return_value = mock_container

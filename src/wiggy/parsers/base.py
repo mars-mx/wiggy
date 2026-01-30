@@ -40,6 +40,6 @@ class Parser(ABC):
         """
         ...
 
-    def reset(self) -> None:
+    def reset(self) -> None:  # noqa: B027
         """Reset parser state for a new session."""
         pass

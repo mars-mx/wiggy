@@ -1,8 +1,13 @@
 """SQL schema and migrations for task history."""
 
+import logging
 from sqlite3 import Connection
 
-SCHEMA_VERSION = 3
+log = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 4
+
+DEFAULT_EMBEDDING_DIM = 768
 
 SCHEMA_SQL = """
 -- Schema version for migrations
@@ -91,6 +96,18 @@ CREATE TABLE IF NOT EXISTS artifact (
 
 CREATE INDEX IF NOT EXISTS idx_artifact_task_id ON artifact(task_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_created_at ON artifact(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL,
+    version INTEGER NOT NULL DEFAULT 1,
+    content TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(key, version)
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_key ON knowledge(key);
+CREATE INDEX IF NOT EXISTS idx_knowledge_key_version ON knowledge(key, version DESC);
 """
 
 # Migrations: key is "from_version", value is SQL to apply
@@ -124,6 +141,82 @@ MIGRATIONS: dict[int, str] = {
 }
 
 
+VEC_TABLES = ("vec_knowledge", "vec_results", "vec_artifacts")
+
+
+def _get_vec_dim(conn: Connection, table: str) -> int | None:
+    """Return the embedding dimension of an existing vec0 table, or None."""
+    cursor = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    )
+    if cursor.fetchone() is None:
+        return None
+    # shadow column table stores the dimension info; query a row to inspect length
+    try:
+        row = conn.execute(f"SELECT embedding FROM {table} LIMIT 1").fetchone()
+        if row is not None:
+            import struct
+
+            # vec0 stores floats as raw bytes
+            return len(row[0]) // struct.calcsize("f")
+    except Exception:
+        pass
+    # Table exists but is empty – read the schema SQL to extract the dimension
+    cursor = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    )
+    sql_row = cursor.fetchone()
+    if sql_row and sql_row[0]:
+        import re
+
+        m = re.search(r"float\[(\d+)]", sql_row[0])
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _ensure_vec_tables(conn: Connection, embedding_dim: int) -> None:
+    """Create or recreate vec0 virtual tables with the correct dimension."""
+    for table in VEC_TABLES:
+        existing_dim = _get_vec_dim(conn, table)
+        if existing_dim is not None and existing_dim != embedding_dim:
+            log.warning(
+                "Embedding dimension changed (%d -> %d), recreating %s",
+                existing_dim,
+                embedding_dim,
+                table,
+            )
+            conn.execute(f"DROP TABLE IF EXISTS {table}")
+            existing_dim = None
+        if existing_dim is None:
+            conn.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS {table} "
+                f"USING vec0(embedding float[{embedding_dim}])"
+            )
+
+
+def _migrate_v3_to_v4(conn: Connection, embedding_dim: int) -> None:
+    """Migrate schema from v3 to v4: add knowledge table and vec tables."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS knowledge (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            content TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(key, version)
+        );
+        CREATE INDEX IF NOT EXISTS idx_knowledge_key
+            ON knowledge(key);
+        CREATE INDEX IF NOT EXISTS idx_knowledge_key_version
+            ON knowledge(key, version DESC);
+    """
+    )
+    _ensure_vec_tables(conn, embedding_dim)
+
+
 def get_schema_version(conn: Connection) -> int:
     """Get the current schema version from the database.
 
@@ -142,9 +235,10 @@ def get_schema_version(conn: Connection) -> int:
     return row[0] if row else 0
 
 
-def init_schema(conn: Connection) -> None:
+def init_schema(conn: Connection, embedding_dim: int = DEFAULT_EMBEDDING_DIM) -> None:
     """Initialize the database schema."""
     conn.executescript(SCHEMA_SQL)
+    _ensure_vec_tables(conn, embedding_dim)
     # Set initial version if not present
     cursor = conn.execute("SELECT version FROM schema_version LIMIT 1")
     if cursor.fetchone() is None:
@@ -152,19 +246,26 @@ def init_schema(conn: Connection) -> None:
     conn.commit()
 
 
-def migrate_if_needed(conn: Connection) -> None:
+def migrate_if_needed(
+    conn: Connection, embedding_dim: int = DEFAULT_EMBEDDING_DIM
+) -> None:
     """Run any pending migrations to bring schema up to date."""
     current_version = get_schema_version(conn)
 
     if current_version == 0:
         # Fresh install, just init
-        init_schema(conn)
+        init_schema(conn, embedding_dim)
         return
 
     # Apply migrations sequentially
     while current_version < SCHEMA_VERSION:
         if current_version in MIGRATIONS:
             conn.executescript(MIGRATIONS[current_version])
+        elif current_version == 3:
+            _migrate_v3_to_v4(conn, embedding_dim)
         current_version += 1
         conn.execute("UPDATE schema_version SET version = ?", (current_version,))
         conn.commit()
+
+    # Always ensure vec tables match current embedding dimensions
+    _ensure_vec_tables(conn, embedding_dim)

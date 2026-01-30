@@ -98,8 +98,22 @@ def build_mcp_system_prompt(
     lines = [
         "You are running as part of a multi-step process. "
         "You have access to wiggy MCP tools:",
+        "",
+        "Results:",
         "- Use `read_result_summary` to load context from previous steps",
         "- Use `write_result` before finishing to pass your findings to the next step",
+        "",
+        "Knowledge base:",
+        "- Use `write_knowledge` to persist decisions or learnings across tasks",
+        "- Use `get_knowledge` to retrieve a knowledge entry by key",
+        "- Use `search_knowledge` to find relevant knowledge, results, and artifacts",
+        "- Use `view_knowledge_history` to see all versions of a knowledge entry",
+        "",
+        "Artifacts:",
+        "- Use `write_artifact` to store structured documents (PRDs, docs, ADRs)",
+        "- Use `load_artifact` to retrieve an artifact by ID",
+        "- Use `list_artifacts` to browse artifacts for the current process",
+        "- Use `list_artifact_templates` and `load_artifact_template` to use templates",
     ]
 
     if completed_steps:
@@ -115,9 +129,23 @@ def _build_single_task_mcp_prompt() -> str:
     """Build a simpler MCP system prompt for single task execution."""
     return (
         "You have access to wiggy MCP tools:\n"
+        "\n"
+        "Results:\n"
         "- Use `write_result` before finishing to save your findings\n"
         "- Use `read_result_summary` to load context from previous "
-        "task executions"
+        "task executions\n"
+        "\n"
+        "Knowledge base:\n"
+        "- Use `write_knowledge` to persist decisions or learnings across tasks\n"
+        "- Use `get_knowledge` to retrieve a knowledge entry by key\n"
+        "- Use `search_knowledge` to find relevant knowledge, results, and artifacts\n"
+        "- Use `view_knowledge_history` to see all versions of a knowledge entry\n"
+        "\n"
+        "Artifacts:\n"
+        "- Use `write_artifact` to store structured documents (PRDs, docs, ADRs)\n"
+        "- Use `load_artifact` to retrieve an artifact by ID\n"
+        "- Use `list_artifacts` to browse artifacts for the current task\n"
+        "- Use `list_artifact_templates` and `load_artifact_template` to use templates"
     )
 
 
@@ -577,7 +605,8 @@ def run(
                         console.print(f"[green]PR created: {pr_url}[/green]")
                     else:
                         console.print(
-                            "[yellow]Failed to create PR (is gh CLI installed?)[/yellow]"
+                            "[yellow]Failed to create PR"
+                            " (is gh CLI installed?)[/yellow]"
                         )
 
             # Cleanup worktrees unless --keep-worktree (only on success)
@@ -719,8 +748,9 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
     # Explicit --global flag: create/update global config
     if global_config:
         if home_config_exists():
+            home_path = get_home_config_path()
             console.print(
-                f"[yellow]Global config already exists at {get_home_config_path()}[/yellow]"
+                f"[yellow]Global config already exists at {home_path}[/yellow]"
             )
             if click.confirm("Overwrite with new configuration?", default=False):
                 run_home_wizard()
@@ -773,9 +803,8 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
     # No flags: interactive flow
     if not home_config_exists():
         # First time user flow
-        console.print(
-            f"[yellow]No global configuration found at {get_home_config_path()}[/yellow]"
-        )
+        home_path = get_home_config_path()
+        console.print(f"[yellow]No global configuration found at {home_path}[/yellow]")
         if click.confirm("Is this your first time using wiggy?", default=True):
             run_home_wizard()
             # Copy default tasks to global location
@@ -1255,13 +1284,76 @@ def process_list(verbose: bool) -> None:
 @click.option("--engine", "-e", help="AI engine to use.")
 @click.option("--model", "-m", help="Model to use (overrides step/task defaults).")
 @click.option("--prompt", "-p", help="Additional prompt/instructions for all steps.")
+@click.option(
+    "--worktree",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="Path to existing git worktree to use.",
+)
+@click.option(
+    "--worktree-root",
+    type=click.Path(file_okay=False, path_type=Path),
+    envvar="WIGGY_WORKTREE_ROOT",
+    help="Root directory for auto-created worktrees.",
+)
+@click.option(
+    "--push/--no-push",
+    default=True,
+    help="Push to remote after execution (default: push).",
+)
+@click.option(
+    "--pr/--no-pr",
+    default=True,
+    help="Create PR after execution (default: create PR).",
+)
+@click.option(
+    "--remote",
+    default="origin",
+    envvar="WIGGY_REMOTE",
+    help="Git remote to push to (default: origin).",
+)
+@click.option(
+    "--keep-worktree",
+    is_flag=True,
+    default=False,
+    help="Keep worktree after execution (default: delete).",
+)
+@click.pass_context
 def process_run(
+    ctx: click.Context,
     name: str,
     engine: str | None,
     model: str | None,
     prompt: str | None,
+    worktree: Path | None,
+    worktree_root: Path | None,
+    push: bool,
+    pr: bool,
+    remote: str,
+    keep_worktree: bool,
 ) -> None:
     """Run a process by name."""
+    # Load config and apply values for options not explicitly set on CLI
+    config = load_config()
+
+    def _from_cli(param_name: str) -> bool:
+        source = ctx.get_parameter_source(param_name)
+        return source == click.core.ParameterSource.COMMANDLINE
+
+    if not _from_cli("engine") and config.engine:
+        engine = config.engine
+    if not _from_cli("model") and config.model:
+        model = config.model
+    if not _from_cli("worktree_root") and config.worktree_root:
+        worktree_root = Path(config.worktree_root)
+    if not _from_cli("push") and config.push is not None:
+        push = config.push
+    if not _from_cli("pr") and config.pr is not None:
+        pr = config.pr
+    if not _from_cli("remote") and config.remote:
+        remote = config.remote
+    if not _from_cli("keep_worktree") and config.keep_worktree is not None:
+        keep_worktree = config.keep_worktree
+
     spec = get_process_by_name(name)
     if spec is None:
         console.print(f"[red]Unknown process: {name}[/red]")
@@ -1281,6 +1373,30 @@ def process_run(
         console.print("[dim]Run 'wiggy task list' to see available tasks.[/dim]")
         raise SystemExit(1)
 
+    # Git worktree setup
+    worktree_info: WorktreeInfo | None = None
+    wt_manager: WorktreeManager | None = None
+
+    try:
+        wt_manager = WorktreeManager()
+
+        if worktree:
+            worktree_info = wt_manager.use_existing_worktree(worktree)
+            console.print(f"[dim]Using existing worktree: {worktree_info.path}[/dim]")
+            console.print(f"[dim]Branch: {worktree_info.branch}[/dim]")
+        else:
+            worktree_info = wt_manager.create_worktree(worktree_root=worktree_root)
+            console.print(f"[dim]Created worktree: {worktree_info.path}[/dim]")
+            console.print(f"[dim]Branch: {worktree_info.branch}[/dim]")
+
+    except NotAGitRepoError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        console.print("[red]wiggy requires a git repository to run.[/red]")
+        raise SystemExit(1) from None
+    except WorktreeError as e:
+        console.print(f"[red]Worktree error: {e}[/red]")
+        raise SystemExit(1) from None
+
     console.print(f"[bold green]Running process: {name}[/bold green]")
     console.print(f"[dim]Steps: {len(spec.steps)}[/dim]")
     if engine:
@@ -1291,12 +1407,25 @@ def process_run(
         console.print(f"[dim]Prompt: {prompt}[/dim]")
 
     start_time = datetime.now(UTC)
-    process_run_result = run_process(
-        process_spec=spec,
-        engine_name=engine,
-        model_override=model,
-        prompt=prompt,
-    )
+    try:
+        process_run_result = run_process(
+            process_spec=spec,
+            engine_name=engine,
+            model_override=model,
+            prompt=prompt,
+            worktree_info=worktree_info,
+        )
+    except Exception:
+        # Cleanup worktree on unexpected error
+        if worktree_info and not keep_worktree and wt_manager and not worktree:
+            console.print(f"[dim]Removing worktree: {worktree_info.path}[/dim]")
+            try:
+                wt_manager.remove_worktree(worktree_info, force=True)
+            except WorktreeError as wt_err:
+                console.print(
+                    f"[yellow]Failed to remove worktree: {wt_err}[/yellow]"
+                )
+        raise
     end_time = datetime.now(UTC)
 
     # Print summary
@@ -1321,15 +1450,55 @@ def process_run(
     any_failed = any(not r.success for r in process_run_result.results)
     if any_failed:
         console.print("Status: [red]FAILED[/red]")
+        console.print(
+            "[yellow]Process failed - skipping push/PR, keeping worktree[/yellow]"
+        )
         raise SystemExit(1)
     else:
         console.print("Status: [green]SUCCESS[/green]")
 
+    # Post-execution git operations
+    if worktree_info is not None:
+        git_ops = GitOperations(worktree_info)
+
+        if push and git_ops.has_commits():
+            console.print(
+                f"[dim]Pushing {worktree_info.branch} to {remote}...[/dim]"
+            )
+            if git_ops.push_to_remote(remote):
+                console.print(
+                    f"[green]Pushed {worktree_info.branch} to {remote}[/green]"
+                )
+            else:
+                console.print(
+                    f"[yellow]Failed to push {worktree_info.branch}[/yellow]"
+                )
+
+        if pr and push and git_ops.has_commits():
+            console.print(
+                f"[dim]Creating pull request for {worktree_info.branch}...[/dim]"
+            )
+            pr_url = git_ops.create_pull_request()
+            if pr_url:
+                console.print(f"[green]PR created: {pr_url}[/green]")
+            else:
+                console.print(
+                    "[yellow]Failed to create PR (is gh CLI installed?)[/yellow]"
+                )
+
+        # Cleanup worktree unless --keep-worktree or using existing worktree
+        if not keep_worktree and wt_manager and not worktree:
+            console.print(f"[dim]Removing worktree: {worktree_info.path}[/dim]")
+            try:
+                wt_manager.remove_worktree(worktree_info, force=True)
+            except WorktreeError as e:
+                console.print(
+                    f"[yellow]Failed to remove worktree: {e}[/yellow]"
+                )
+
 
 @process.command("create")
-@click.option(
-    "--local", "-l", is_flag=True, help="Create process in local directory."
-)
+@click.option("--local", "-l", is_flag=True, help="Create process in local directory.")
 def process_create(local: bool) -> None:
     """Create a new process via AI assistance."""
     # Check that create-task exists (reuse same AI-assisted creation approach)
@@ -1439,9 +1608,7 @@ steps:
 
     exit_code = executor_instance.exit_code or 0
     if exit_code != 0:
-        console.print(
-            f"[red]Process creation failed with exit code: {exit_code}[/red]"
-        )
+        console.print(f"[red]Process creation failed with exit code: {exit_code}[/red]")
         raise SystemExit(exit_code)
 
     console.print("\n[green]Process created successfully![/green]")

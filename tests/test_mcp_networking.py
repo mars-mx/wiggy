@@ -23,9 +23,7 @@ class TestResolveMCPBindHost:
 
         mock_bridge = MagicMock()
         mock_bridge.attrs = {
-            "IPAM": {
-                "Config": [{"Subnet": "172.17.0.0/16", "Gateway": "172.17.0.1"}]
-            }
+            "IPAM": {"Config": [{"Subnet": "172.17.0.0/16", "Gateway": "172.17.0.1"}]}
         }
         mock_client = MagicMock()
         mock_client.networks.get.return_value = mock_bridge

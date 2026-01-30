@@ -10,6 +10,7 @@ from pathlib import Path
 
 from wiggy.console import console
 from wiggy.executors import get_executor
+from wiggy.git.worktree import WorktreeInfo
 from wiggy.history import TaskHistoryRepository
 from wiggy.history.models import TaskLog
 from wiggy.mcp import MCP_TOOL_NAMES, WiggyMCPServer, resolve_mcp_bind_host
@@ -90,6 +91,7 @@ def run_process(
     engine_name: str | None = None,
     model_override: str | None = None,
     prompt: str | None = None,
+    worktree_info: WorktreeInfo | None = None,
 ) -> ProcessRun:
     """Execute a process sequentially, running each step via Docker.
 
@@ -103,7 +105,9 @@ def run_process(
         ProcessRun with results for each completed step.
     """
     process_id = secrets.token_hex(4)
-    process_run = ProcessRun(process_id=process_id, spec=process_spec)
+    process_run = ProcessRun(
+        process_id=process_id, spec=process_spec, worktree_info=worktree_info
+    )
 
     repo = TaskHistoryRepository()
 
@@ -196,9 +200,13 @@ def run_process(
                 process_id=process_id,
                 executor_id=1,
                 created_at=start_time.isoformat(),
-                branch="main",
-                worktree=str(Path.cwd()),
-                main_repo=str(Path.cwd()),
+                branch=worktree_info.branch if worktree_info else "main",
+                worktree=str(worktree_info.path) if worktree_info else str(Path.cwd()),
+                main_repo=(
+                    str(worktree_info.main_repo)
+                    if worktree_info
+                    else str(Path.cwd())
+                ),
                 engine=resolved_engine.name,
                 model=effective_model,
                 task_name=step.task,
@@ -215,7 +223,8 @@ def run_process(
                 quiet=True,
                 extra_args=extra_args,
                 allowed_tools=allowed_tools,
-                mount_cwd=True,
+                worktree_info=worktree_info,
+                mount_cwd=worktree_info is None,
                 mcp_port=mcp_port,
             )
             executor.set_task_id(task_id)

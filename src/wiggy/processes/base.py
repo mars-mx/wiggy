@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from wiggy.git.worktree import WorktreeInfo
 
 
 @dataclass
@@ -75,9 +78,7 @@ class ProcessSpec:
         return result
 
     @classmethod
-    def from_dict(
-        cls, data: dict[str, Any], source: Path | None = None
-    ) -> ProcessSpec:
+    def from_dict(cls, data: dict[str, Any], source: Path | None = None) -> ProcessSpec:
         """Deserialize from dict."""
         steps_raw = data.get("steps", [])
         steps = tuple(ProcessStep.from_dict(s) for s in steps_raw)
@@ -113,6 +114,7 @@ class ProcessRun:
     steps: list[ProcessStep] = field(init=False)
     results: list[StepResult] = field(default_factory=list)
     current_index: int = 0
+    worktree_info: WorktreeInfo | None = None
 
     def __post_init__(self) -> None:
         self.steps = list(self.spec.steps)

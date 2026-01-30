@@ -19,8 +19,8 @@ def test_engine_dataclass() -> None:
 
 def test_engine_is_installed_true() -> None:
     """Test is_installed returns True when command exists."""
-    engine = Engine(name="Python", cli_command="python", install_info="test")
-    # python should always be available in test environment
+    engine = Engine(name="Python", cli_command="python3", install_info="test")
+    # python3 should always be available in test environment
     assert engine.is_installed() is True
 
 

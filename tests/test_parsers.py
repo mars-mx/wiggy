@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from wiggy.parsers import (
     ClaudeParser,
     MessageType,
@@ -38,12 +36,14 @@ class TestClaudeParser:
     def test_parse_system_init(self) -> None:
         """Test parsing system init messages."""
         parser = ClaudeParser()
-        line = json.dumps({
-            "type": "system",
-            "subtype": "init",
-            "session_id": "sess_123",
-            "model": "claude-opus-4-5-20251101",
-        })
+        line = json.dumps(
+            {
+                "type": "system",
+                "subtype": "init",
+                "session_id": "sess_123",
+                "model": "claude-opus-4-5-20251101",
+            }
+        )
         result = parser.parse_line(line)
 
         assert result.message_type == MessageType.SYSTEM_INIT
@@ -52,12 +52,12 @@ class TestClaudeParser:
     def test_parse_assistant_message(self) -> None:
         """Test parsing assistant messages."""
         parser = ClaudeParser()
-        line = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [{"type": "text", "text": "Hello world"}]
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": "Hello world"}]},
             }
-        })
+        )
         result = parser.parse_line(line)
 
         assert result.message_type == MessageType.ASSISTANT
@@ -66,16 +66,18 @@ class TestClaudeParser:
     def test_parse_assistant_message_multiple_text_blocks(self) -> None:
         """Test parsing assistant messages with multiple text blocks."""
         parser = ClaudeParser()
-        line = json.dumps({
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "text", "text": "First part"},
-                    {"type": "tool_use", "name": "Read"},
-                    {"type": "text", "text": "Second part"},
-                ]
+        line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "First part"},
+                        {"type": "tool_use", "name": "Read"},
+                        {"type": "text", "text": "Second part"},
+                    ]
+                },
             }
-        })
+        )
         result = parser.parse_line(line)
 
         assert result.message_type == MessageType.ASSISTANT
@@ -84,14 +86,16 @@ class TestClaudeParser:
     def test_parse_result_success(self) -> None:
         """Test parsing success result."""
         parser = ClaudeParser()
-        line = json.dumps({
-            "type": "result",
-            "subtype": "success",
-            "result": "Task completed successfully",
-            "total_cost_usd": 0.05,
-            "duration_ms": 12500,
-            "usage": {"input_tokens": 100, "output_tokens": 50},
-        })
+        line = json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "result": "Task completed successfully",
+                "total_cost_usd": 0.05,
+                "duration_ms": 12500,
+                "usage": {"input_tokens": 100, "output_tokens": 50},
+            }
+        )
         result = parser.parse_line(line)
 
         assert result.message_type == MessageType.RESULT
@@ -102,10 +106,12 @@ class TestClaudeParser:
     def test_parse_result_error(self) -> None:
         """Test parsing error result."""
         parser = ClaudeParser()
-        line = json.dumps({
-            "type": "result",
-            "subtype": "error_max_turns",
-        })
+        line = json.dumps(
+            {
+                "type": "result",
+                "subtype": "error_max_turns",
+            }
+        )
         result = parser.parse_line(line)
 
         assert result.message_type == MessageType.RESULT
@@ -170,21 +176,29 @@ class TestClaudeParser:
         parser = ClaudeParser()
 
         # First parse init to capture session info
-        parser.parse_line(json.dumps({
-            "type": "system",
-            "subtype": "init",
-            "session_id": "sess_123",
-            "model": "claude-opus-4-5-20251101",
-        }))
+        parser.parse_line(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "sess_123",
+                    "model": "claude-opus-4-5-20251101",
+                }
+            )
+        )
 
         # Then parse result
-        parser.parse_line(json.dumps({
-            "type": "result",
-            "subtype": "success",
-            "total_cost_usd": 0.05,
-            "duration_ms": 12500,
-            "usage": {"input_tokens": 100, "output_tokens": 50},
-        }))
+        parser.parse_line(
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                    "total_cost_usd": 0.05,
+                    "duration_ms": 12500,
+                    "usage": {"input_tokens": 100, "output_tokens": 50},
+                }
+            )
+        )
 
         summary = parser.get_summary()
         assert summary is not None
@@ -208,16 +222,24 @@ class TestClaudeParser:
         parser = ClaudeParser()
 
         # Parse some messages
-        parser.parse_line(json.dumps({
-            "type": "system",
-            "subtype": "init",
-            "session_id": "sess_123",
-            "model": "claude-opus-4-5-20251101",
-        }))
-        parser.parse_line(json.dumps({
-            "type": "result",
-            "subtype": "success",
-        }))
+        parser.parse_line(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "sess_123",
+                    "model": "claude-opus-4-5-20251101",
+                }
+            )
+        )
+        parser.parse_line(
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "success",
+                }
+            )
+        )
 
         # Reset
         parser.reset()

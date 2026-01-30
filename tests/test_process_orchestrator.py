@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from wiggy.processes.base import ProcessRun, ProcessSpec, ProcessStep, StepResult
 from wiggy.processes.orchestrator import build_process_status_prompt
 

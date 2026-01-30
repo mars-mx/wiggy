@@ -1,7 +1,7 @@
 """Integration test: Docker container spawn + artifact creation from template."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import docker
@@ -61,7 +61,7 @@ class TestDockerArtifactIntegration:
             task_id=task_id,
             process_id=process_id,
             executor_id=1,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             branch="wiggy/integration-test",
             worktree=str(tmp_path),
             main_repo=str(tmp_path),

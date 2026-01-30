@@ -3,8 +3,6 @@
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from wiggy.tasks import (
     DEFAULT_TASKS,
     TaskSpec,
@@ -190,7 +188,8 @@ class TestTaskDiscovery:
         task_dir.mkdir()
 
         (task_dir / "task.yaml").write_text(
-            "name: implement\ndescription: Implement feature\ntools:\n  - Read\n  - Write"
+            "name: implement\ndescription: Implement feature\n"
+            "tools:\n  - Read\n  - Write"
         )
         (task_dir / "prompt.md").write_text("# Implementation\n\nDo the thing.")
 
@@ -236,9 +235,7 @@ class TestTaskResolution:
         )
 
         with (
-            patch(
-                "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
-            ),
+            patch("wiggy.tasks.loader.get_global_tasks_path", return_value=global_path),
             patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
         ):
             spec = get_task_by_name("implement")
@@ -259,9 +256,7 @@ class TestTaskResolution:
         )
 
         with (
-            patch(
-                "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
-            ),
+            patch("wiggy.tasks.loader.get_global_tasks_path", return_value=global_path),
             patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
         ):
             spec = get_task_by_name("analyse")
@@ -275,9 +270,7 @@ class TestTaskResolution:
         local_path = tmp_path / "local" / "tasks"  # Empty
 
         with (
-            patch(
-                "wiggy.tasks.loader.get_global_tasks_path", return_value=global_path
-            ),
+            patch("wiggy.tasks.loader.get_global_tasks_path", return_value=global_path),
             patch("wiggy.tasks.loader.get_local_tasks_path", return_value=local_path),
         ):
             # Task exists in package but not in global/local
@@ -300,7 +293,7 @@ class TestDefaultTasks:
         assert "test" in DEFAULT_TASKS
 
     def test_package_default_tasks_can_be_loaded(self) -> None:
-        """Test that package default tasks can be loaded when global points to package."""
+        """Test that package default tasks can be loaded."""
         from wiggy.tasks.loader import get_package_tasks_path
 
         package_path = get_package_tasks_path()
