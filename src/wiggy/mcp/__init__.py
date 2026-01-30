@@ -11,6 +11,11 @@ MCP_TOOL_NAMES: tuple[str, ...] = (
     "mcp__wiggy__write_result",
     "mcp__wiggy__load_result",
     "mcp__wiggy__read_result_summary",
+    "mcp__wiggy__write_artifact",
+    "mcp__wiggy__load_artifact",
+    "mcp__wiggy__list_artifacts",
+    "mcp__wiggy__list_artifact_templates",
+    "mcp__wiggy__load_artifact_template",
 )
 
 __all__ = [

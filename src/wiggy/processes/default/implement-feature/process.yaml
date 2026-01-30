@@ -1,0 +1,9 @@
+name: implement-feature
+description: |
+  Full feature implementation cycle: analyze the codebase, research
+  relevant patterns, implement the changes, and review the result.
+steps:
+  - task: analyse
+  - task: research
+  - task: implement
+  - task: review

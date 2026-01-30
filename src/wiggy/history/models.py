@@ -141,3 +141,35 @@ class TaskResult:
             created_at=row["created_at"],
             summary_text=row["summary_text"],
         )
+
+
+@dataclass(frozen=True)
+class Artifact:
+    """Immutable record of an artifact document."""
+
+    id: str  # 8 hex chars
+    task_id: str  # FK → task_log.task_id
+    title: str
+    content: str
+    format: str  # 'json', 'markdown', 'xml', 'text'
+    tags: tuple[str, ...]  # Categorization tags
+    created_at: str  # ISO8601 UTC
+    template_name: str | None = None  # Name of template used (informational)
+
+    @classmethod
+    def from_row(cls, row: Row) -> Self:
+        """Create an Artifact from a database row.
+
+        tags is stored as a JSON array in the database.
+        """
+        tags_raw = row["tags"]
+        return cls(
+            id=row["id"],
+            task_id=row["task_id"],
+            title=row["title"],
+            content=row["content"],
+            format=row["format"],
+            tags=tuple(json.loads(tags_raw)) if tags_raw else (),
+            created_at=row["created_at"],
+            template_name=row["template_name"],
+        )

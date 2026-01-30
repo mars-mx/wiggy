@@ -16,8 +16,13 @@ from starlette.routing import Mount
 
 from wiggy.history.repository import TaskHistoryRepository
 from wiggy.mcp.tools import (
+    handle_list_artifact_templates,
+    handle_list_artifacts,
+    handle_load_artifact,
+    handle_load_artifact_template,
     handle_load_result,
     handle_read_result_summary,
+    handle_write_artifact,
     handle_write_result,
 )
 
@@ -112,6 +117,98 @@ def _build_mcp_app(
             task_id: Specific task ID (overrides task_name lookup).
         """
         return handle_read_result_summary(repo, process_id, task_name, task_id)
+
+    @mcp.tool()
+    async def write_artifact(
+        ctx: Context[Any, Any, Any],
+        title: str,
+        content: str,
+        format: str,
+        template_name: str | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        """Write an artifact document.
+
+        Stores a structured document (PRD, documentation, ADR, etc.)
+        associated with the current task. Use list_artifact_templates
+        to see available templates, or write freeform content.
+
+        Args:
+            ctx: MCP context (provides access to request headers).
+            title: The artifact title.
+            content: The full artifact content.
+            format: Content format: 'json', 'markdown', 'xml', or 'text'.
+            template_name: Optional name of the template used to create
+                           this artifact (informational).
+            tags: Optional tags for categorization.
+        """
+        task_id = _extract_task_id(ctx)
+        return handle_write_artifact(
+            repo, task_id, title, content, format, template_name, tags
+        )
+
+    @mcp.tool()
+    async def load_artifact(
+        ctx: Context[Any, Any, Any],
+        artifact_id: str,
+    ) -> str:
+        """Load a full artifact by ID.
+
+        Returns the complete artifact including content, format, tags,
+        and metadata.
+
+        Args:
+            ctx: MCP context.
+            artifact_id: The artifact ID to load.
+        """
+        return handle_load_artifact(repo, artifact_id)
+
+    @mcp.tool()
+    async def list_artifacts(
+        ctx: Context[Any, Any, Any],
+        task_id: str | None = None,
+    ) -> str:
+        """List artifacts for a task or the whole process.
+
+        Returns artifact metadata (without content) for browsing.
+        Use load_artifact to fetch the full content of a specific artifact.
+
+        Args:
+            ctx: MCP context.
+            task_id: Optional task ID to filter by. If not provided,
+                     lists all artifacts in the current process.
+        """
+        return handle_list_artifacts(repo, process_id, task_id)
+
+    @mcp.tool()
+    async def list_artifact_templates(
+        ctx: Context[Any, Any, Any],
+    ) -> str:
+        """List available artifact templates.
+
+        Returns template names, descriptions, and formats. Use
+        load_artifact_template to get the full template content.
+
+        Args:
+            ctx: MCP context.
+        """
+        return handle_list_artifact_templates()
+
+    @mcp.tool()
+    async def load_artifact_template(
+        ctx: Context[Any, Any, Any],
+        template_name: str,
+    ) -> str:
+        """Load a full artifact template by name.
+
+        Returns the template content, format, and metadata. Use this
+        as a starting point when creating artifacts with write_artifact.
+
+        Args:
+            ctx: MCP context.
+            template_name: Name of the template to load.
+        """
+        return handle_load_artifact_template(template_name)
 
     return mcp
 

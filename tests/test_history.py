@@ -358,7 +358,7 @@ class TestSchemaMigration:
         """Test migrating a v1 database to v2 adds the task_result table."""
         import sqlite3
 
-        from wiggy.history.schema import SCHEMA_SQL, get_schema_version
+        from wiggy.history.schema import SCHEMA_SQL, SCHEMA_VERSION, get_schema_version
 
         db_path = tmp_path / "migrate.db"
         conn = sqlite3.connect(db_path)
@@ -392,7 +392,7 @@ class TestSchemaMigration:
             "SELECT name FROM sqlite_master WHERE type='table' AND name='task_result'"
         )
         assert cursor.fetchone() is not None
-        assert get_schema_version(conn) == 2
+        assert get_schema_version(conn) == SCHEMA_VERSION
         conn.close()
 
     def test_fresh_install_has_task_result(self, tmp_path: Path) -> None:

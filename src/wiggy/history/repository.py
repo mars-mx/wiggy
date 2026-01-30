@@ -5,7 +5,7 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from wiggy.history.models import TaskLog, TaskResult
+from wiggy.history.models import Artifact, TaskLog, TaskResult
 from wiggy.history.schema import migrate_if_needed
 
 
@@ -385,3 +385,97 @@ class TaskHistoryRepository:
             cursor = conn.execute("DELETE FROM task_log WHERE task_id = ?", (task_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    # Artifact operations
+
+    def create_artifact(
+        self,
+        task_id: str,
+        title: str,
+        content: str,
+        fmt: str,
+        template_name: str | None = None,
+        tags: list[str] | None = None,
+    ) -> Artifact:
+        """Insert a new artifact record.
+
+        Args:
+            task_id: The task this artifact belongs to.
+            title: Artifact title.
+            content: The artifact content body.
+            fmt: Format string ('json', 'markdown', 'xml', 'text').
+            template_name: Optional name of the template used.
+            tags: Optional categorization tags.
+
+        Returns:
+            The created Artifact.
+        """
+        import secrets
+
+        artifact_id = secrets.token_hex(4)
+        created_at = datetime.now(UTC).isoformat()
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO artifact (
+                    id, task_id, title, content, format,
+                    template_name, tags, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    artifact_id,
+                    task_id,
+                    title,
+                    content,
+                    fmt,
+                    template_name,
+                    json.dumps(tags or []),
+                    created_at,
+                ),
+            )
+            conn.commit()
+
+        return Artifact(
+            id=artifact_id,
+            task_id=task_id,
+            title=title,
+            content=content,
+            format=fmt,
+            tags=tuple(tags) if tags else (),
+            created_at=created_at,
+            template_name=template_name,
+        )
+
+    def get_artifact_by_id(self, artifact_id: str) -> Artifact | None:
+        """Get an artifact by its ID."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM artifact WHERE id = ?", (artifact_id,)
+            )
+            row = cursor.fetchone()
+            return Artifact.from_row(row) if row else None
+
+    def get_artifacts_by_task_id(self, task_id: str) -> list[Artifact]:
+        """Get all artifacts for a task."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM artifact WHERE task_id = ? ORDER BY created_at",
+                (task_id,),
+            )
+            return [Artifact.from_row(row) for row in cursor.fetchall()]
+
+    def get_artifacts_by_process_id(self, process_id: str) -> list[Artifact]:
+        """Get all artifacts for all tasks in a process."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                SELECT a.*
+                FROM artifact a
+                JOIN task_log tl ON a.task_id = tl.task_id
+                WHERE tl.process_id = ?
+                ORDER BY a.created_at
+                """,
+                (process_id,),
+            )
+            return [Artifact.from_row(row) for row in cursor.fetchall()]

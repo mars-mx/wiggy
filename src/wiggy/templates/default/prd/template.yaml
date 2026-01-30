@@ -1,0 +1,6 @@
+name: prd
+description: Product Requirements Document template
+format: markdown
+tags:
+  - requirements
+  - planning

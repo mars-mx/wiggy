@@ -1,0 +1,6 @@
+name: documentation
+description: Technical documentation template
+format: markdown
+tags:
+  - documentation
+  - technical

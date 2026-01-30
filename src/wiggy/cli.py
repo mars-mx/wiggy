@@ -11,7 +11,12 @@ from queue import Queue
 import click
 
 from wiggy import __version__
-from wiggy.config.init import copy_default_tasks, ensure_wiggy_dir
+from wiggy.config.init import (
+    copy_default_processes,
+    copy_default_tasks,
+    copy_default_templates,
+    ensure_wiggy_dir,
+)
 from wiggy.config.loader import (
     get_home_config_path,
     home_config_exists,
@@ -39,6 +44,13 @@ from wiggy.history import (
 from wiggy.mcp import MCP_TOOL_NAMES, WiggyMCPServer, resolve_mcp_bind_host
 from wiggy.monitor import Monitor
 from wiggy.parsers.messages import MessageType, ParsedMessage
+from wiggy.processes import (
+    ProcessSpec,
+    get_all_processes,
+    get_process_by_name,
+    run_process,
+)
+from wiggy.processes.loader import get_global_processes_path, get_local_processes_path
 from wiggy.runner import resolve_engine
 from wiggy.tasks import (
     TaskSpec,
@@ -722,6 +734,14 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             console.print(
                 f"[green]Copied {len(copied)} default tasks to ~/.wiggy/tasks/[/green]"
             )
+        copied_procs = copy_default_processes(local=False)
+        if copied_procs:
+            n = len(copied_procs)
+            console.print(f"[green]Copied {n} default processes[/green]")
+        copied_tmpls = copy_default_templates(local=False)
+        if copied_tmpls:
+            n = len(copied_tmpls)
+            console.print(f"[green]Copied {n} default templates[/green]")
         return
 
     # Explicit --local flag: create/update local config
@@ -740,6 +760,14 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             console.print(
                 f"[green]Copied {len(copied)} default tasks to ./.wiggy/tasks/[/green]"
             )
+        copied_procs = copy_default_processes(local=True)
+        if copied_procs:
+            n = len(copied_procs)
+            console.print(f"[green]Copied {n} default processes[/green]")
+        copied_tmpls = copy_default_templates(local=True)
+        if copied_tmpls:
+            n = len(copied_tmpls)
+            console.print(f"[green]Copied {n} default templates[/green]")
         return
 
     # No flags: interactive flow
@@ -754,6 +782,14 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             copied = copy_default_tasks(local=False)
             if copied:
                 msg = f"[green]Copied {len(copied)} tasks to ~/.wiggy/tasks/[/green]"
+                console.print(msg)
+            copied_procs = copy_default_processes(local=False)
+            if copied_procs:
+                msg = f"[green]Copied {len(copied_procs)} processes[/green]"
+                console.print(msg)
+            copied_tmpls = copy_default_templates(local=False)
+            if copied_tmpls:
+                msg = f"[green]Copied {len(copied_tmpls)} templates[/green]"
                 console.print(msg)
         else:
             console.print(
@@ -772,6 +808,14 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
             console.print(
                 f"[green]Copied {len(copied)} default tasks to ~/.wiggy/tasks/[/green]"
             )
+        copied_procs = copy_default_processes(local=False)
+        if copied_procs:
+            n = len(copied_procs)
+            console.print(f"[green]Copied {n} default processes[/green]")
+        copied_tmpls = copy_default_templates(local=False)
+        if copied_tmpls:
+            n = len(copied_tmpls)
+            console.print(f"[green]Copied {n} default templates[/green]")
 
         if local_config_exists():
             console.print(
@@ -785,12 +829,28 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
                 if copied:
                     msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
                     console.print(f"[green]{msg}[/green]")
+                copied_procs = copy_default_processes(local=True)
+                if copied_procs:
+                    msg = f"Copied {len(copied_procs)} default processes"
+                    console.print(f"[green]{msg}[/green]")
+                copied_tmpls = copy_default_templates(local=True)
+                if copied_tmpls:
+                    msg = f"Copied {len(copied_tmpls)} default templates"
+                    console.print(f"[green]{msg}[/green]")
             else:
                 console.print("\nNo config changes made.")
                 # Still copy any missing local tasks
                 copied = copy_default_tasks(local=True)
                 if copied:
                     msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
+                copied_procs = copy_default_processes(local=True)
+                if copied_procs:
+                    msg = f"Copied {len(copied_procs)} default processes"
+                    console.print(f"[green]{msg}[/green]")
+                copied_tmpls = copy_default_templates(local=True)
+                if copied_tmpls:
+                    msg = f"Copied {len(copied_tmpls)} default templates"
                     console.print(f"[green]{msg}[/green]")
         else:
             if click.confirm(
@@ -803,12 +863,28 @@ def init(global_config: bool, local_config: bool, show: bool) -> None:
                 if copied:
                     msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
                     console.print(f"[green]{msg}[/green]")
+                copied_procs = copy_default_processes(local=True)
+                if copied_procs:
+                    msg = f"Copied {len(copied_procs)} default processes"
+                    console.print(f"[green]{msg}[/green]")
+                copied_tmpls = copy_default_templates(local=True)
+                if copied_tmpls:
+                    msg = f"Copied {len(copied_tmpls)} default templates"
+                    console.print(f"[green]{msg}[/green]")
             else:
                 console.print("\nUsing global configuration.")
                 # Still copy default tasks to local location
                 copied = copy_default_tasks(local=True)
                 if copied:
                     msg = f"Copied {len(copied)} default tasks to ./.wiggy/tasks/"
+                    console.print(f"[green]{msg}[/green]")
+                copied_procs = copy_default_processes(local=True)
+                if copied_procs:
+                    msg = f"Copied {len(copied_procs)} default processes"
+                    console.print(f"[green]{msg}[/green]")
+                copied_tmpls = copy_default_templates(local=True)
+                if copied_tmpls:
+                    msg = f"Copied {len(copied_tmpls)} default templates"
                     console.print(f"[green]{msg}[/green]")
 
 
@@ -1125,3 +1201,263 @@ Create the new task files in: {container_target_dir}
 
     console.print("\n[green]Task created successfully![/green]")
     console.print("[dim]Run 'wiggy task list' to see available tasks.[/dim]")
+
+
+def _get_process_source_label(spec: ProcessSpec) -> str:
+    """Get a label indicating whether a process is from global or local."""
+    if spec.source is None:
+        return ""
+    source_str = str(spec.source)
+    if ".wiggy/processes" in source_str:
+        if str(Path.cwd()) in source_str:
+            return "(local)"
+        return "(global)"
+    return ""
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def process(ctx: click.Context) -> None:
+    """Manage and run processes."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@process.command("list")
+@click.option("--verbose", "-v", is_flag=True, help="Show process details.")
+def process_list(verbose: bool) -> None:
+    """List available processes."""
+    processes = get_all_processes()
+
+    if not processes:
+        console.print("[yellow]No processes found.[/yellow]")
+        console.print(
+            "[dim]Run 'wiggy init' to copy default processes "
+            "to ~/.wiggy/processes/[/dim]"
+        )
+        return
+
+    console.print("[bold]Available Processes:[/bold]\n")
+    for name, spec in sorted(processes.items()):
+        source_label = _get_process_source_label(spec)
+        console.print(f"  [cyan]{name}[/cyan] {source_label}")
+        if verbose:
+            if spec.description:
+                console.print(f"    {spec.description.strip()}")
+            step_names = [step.task for step in spec.steps]
+            chain = " -> ".join(step_names)
+            console.print(f"    [dim]Steps: {chain}[/dim]")
+            console.print()
+
+
+@process.command("run")
+@click.argument("name")
+@click.option("--engine", "-e", help="AI engine to use.")
+@click.option("--model", "-m", help="Model to use (overrides step/task defaults).")
+@click.option("--prompt", "-p", help="Additional prompt/instructions for all steps.")
+def process_run(
+    name: str,
+    engine: str | None,
+    model: str | None,
+    prompt: str | None,
+) -> None:
+    """Run a process by name."""
+    spec = get_process_by_name(name)
+    if spec is None:
+        console.print(f"[red]Unknown process: {name}[/red]")
+        console.print("[dim]Run 'wiggy process list' to see available processes.[/dim]")
+        raise SystemExit(1)
+
+    # Validate all referenced tasks exist upfront
+    missing_tasks: list[str] = []
+    for step in spec.steps:
+        if get_task_by_name(step.task) is None:
+            missing_tasks.append(step.task)
+
+    if missing_tasks:
+        console.print("[red]Process references missing tasks:[/red]")
+        for task_name in missing_tasks:
+            console.print(f"  - {task_name}")
+        console.print("[dim]Run 'wiggy task list' to see available tasks.[/dim]")
+        raise SystemExit(1)
+
+    console.print(f"[bold green]Running process: {name}[/bold green]")
+    console.print(f"[dim]Steps: {len(spec.steps)}[/dim]")
+    if engine:
+        console.print(f"[dim]Engine: {engine}[/dim]")
+    if model:
+        console.print(f"[dim]Model: {model}[/dim]")
+    if prompt:
+        console.print(f"[dim]Prompt: {prompt}[/dim]")
+
+    start_time = datetime.now(UTC)
+    process_run_result = run_process(
+        process_spec=spec,
+        engine_name=engine,
+        model_override=model,
+        prompt=prompt,
+    )
+    end_time = datetime.now(UTC)
+
+    # Print summary
+    total_steps = len(process_run_result.steps)
+    completed = len(process_run_result.results)
+    passed = sum(1 for r in process_run_result.results if r.success)
+    failed = sum(1 for r in process_run_result.results if not r.success)
+
+    duration = end_time - start_time
+    total_seconds = int(duration.total_seconds())
+    minutes = total_seconds // 60
+    seconds = total_seconds % 60
+    duration_str = f"{minutes}m {seconds:02d}s"
+
+    console.print()
+    console.print(f"[bold]Process: {name}[/bold]")
+    console.print(f"Steps: {completed}/{total_steps} completed")
+    if failed > 0:
+        console.print(f"Passed: {passed}, Failed: {failed}")
+    console.print(f"Duration: {duration_str}")
+
+    any_failed = any(not r.success for r in process_run_result.results)
+    if any_failed:
+        console.print("Status: [red]FAILED[/red]")
+        raise SystemExit(1)
+    else:
+        console.print("Status: [green]SUCCESS[/green]")
+
+
+@process.command("create")
+@click.option(
+    "--local", "-l", is_flag=True, help="Create process in local directory."
+)
+def process_create(local: bool) -> None:
+    """Create a new process via AI assistance."""
+    # Check that create-task exists (reuse same AI-assisted creation approach)
+    create_task_spec = get_task_by_name("create-task")
+    if create_task_spec is None:
+        console.print("[red]The 'create-task' task is not available.[/red]")
+        console.print("[dim]Run 'wiggy init' to copy default tasks.[/dim]")
+        raise SystemExit(1)
+
+    # Get user input
+    console.print("[bold]Create a new wiggy process[/bold]\n")
+    goal = click.prompt("What should this process achieve?")
+
+    # Determine target directory and mount options
+    if local:
+        target_dir = get_local_processes_path()
+        container_target_dir = "/workspace/.wiggy/processes"
+        mount_cwd = True
+        global_tasks_rw = False
+    else:
+        target_dir = get_global_processes_path()
+        container_target_dir = "/home/wiggy/.wiggy/processes"
+        mount_cwd = False
+        global_tasks_rw = True
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get existing tasks and processes for context
+    existing_tasks = get_all_tasks()
+    tasks_context = _format_tasks_context(existing_tasks)
+
+    existing_processes = get_all_processes()
+    processes_context = _format_processes_context(existing_processes)
+
+    # Build the main prompt
+    main_prompt = f"""## Goal
+
+{goal}
+
+## Target Directory
+
+Create the new process files in: {container_target_dir}
+Each process lives in its own subdirectory with a process.yaml file.
+
+## Process YAML Format
+
+```yaml
+name: process-name
+description: What this process does
+steps:
+  - task: task-name
+    prompt: Optional step-specific prompt
+  - task: another-task
+```
+
+## Available Tasks
+
+{tasks_context}
+
+## Existing Processes (for reference)
+
+{processes_context}
+"""
+
+    # Resolve engine
+    resolved_engine = resolve_engine(None)
+    if resolved_engine is None:
+        raise SystemExit(1)
+
+    # Build allowed_tools from create-task spec
+    allowed_tools: list[str] | None = None
+    if create_task_spec.tools and create_task_spec.tools != ("*",):
+        allowed_tools = list(create_task_spec.tools)
+
+    # Build extra args for --append-system-prompt
+    extra_args: tuple[str, ...] = ()
+    if create_task_spec.source:
+        prompt_path = create_task_spec.source / "prompt.md"
+        if prompt_path.exists():
+            container_prompt_path = "/home/wiggy/.wiggy/tasks/create-task/prompt.md"
+            extra_args = ("--append-system-prompt", container_prompt_path)
+
+    console.print("\n[bold green]Creating process with AI assistance...[/bold green]")
+    console.print(f"[dim]Engine: {resolved_engine.name}[/dim]")
+    console.print(f"[dim]Target: {target_dir}[/dim]")
+
+    # Create executor
+    executors = get_executors(
+        name="docker",
+        count=1,
+        quiet=True,
+        extra_args=extra_args,
+        allowed_tools=allowed_tools,
+        mount_cwd=mount_cwd,
+        global_tasks_rw=global_tasks_rw,
+    )
+
+    executor_instance = executors[0]
+    executor_instance.setup(resolved_engine, main_prompt)
+
+    try:
+        for msg in executor_instance.run():
+            if msg.content:
+                console.print(msg.content)
+    finally:
+        executor_instance.teardown()
+
+    exit_code = executor_instance.exit_code or 0
+    if exit_code != 0:
+        console.print(
+            f"[red]Process creation failed with exit code: {exit_code}[/red]"
+        )
+        raise SystemExit(exit_code)
+
+    console.print("\n[green]Process created successfully![/green]")
+    console.print("[dim]Run 'wiggy process list' to see available processes.[/dim]")
+
+
+def _format_processes_context(processes: dict[str, ProcessSpec]) -> str:
+    """Format processes as context for AI prompts."""
+    if not processes:
+        return "No existing processes."
+    lines: list[str] = []
+    for name, spec in sorted(processes.items()):
+        step_chain = " -> ".join(step.task for step in spec.steps)
+        lines.append(f"### {name}")
+        if spec.description:
+            lines.append(spec.description.strip())
+        lines.append(f"Steps: {step_chain}")
+        lines.append("")
+    return "\n".join(lines)

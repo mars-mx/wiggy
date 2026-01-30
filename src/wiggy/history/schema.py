@@ -2,7 +2,7 @@
 
 from sqlite3 import Connection
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 -- Schema version for migrations
@@ -76,6 +76,21 @@ CREATE TABLE IF NOT EXISTS task_refs (
     PRIMARY KEY (task_id, commit_hash),
     FOREIGN KEY (task_id) REFERENCES task_log(task_id) ON DELETE CASCADE
 );
+
+-- Artifact documents per task
+CREATE TABLE IF NOT EXISTS artifact (
+    id TEXT PRIMARY KEY,                  -- 8 hex chars (secrets.token_hex(4))
+    task_id TEXT NOT NULL REFERENCES task_log(task_id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    format TEXT NOT NULL,                 -- 'json', 'markdown', 'xml', 'text'
+    template_name TEXT,                   -- Template used (informational)
+    tags TEXT,                            -- JSON array
+    created_at TEXT NOT NULL              -- ISO8601 UTC
+);
+
+CREATE INDEX IF NOT EXISTS idx_artifact_task_id ON artifact(task_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_created_at ON artifact(created_at DESC);
 """
 
 # Migrations: key is "from_version", value is SQL to apply
@@ -90,6 +105,21 @@ MIGRATIONS: dict[int, str] = {
         has_summary INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL
     );
+    """,
+    2: """
+    CREATE TABLE IF NOT EXISTS artifact (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL REFERENCES task_log(task_id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        format TEXT NOT NULL,
+        template_name TEXT,
+        tags TEXT,
+        created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_artifact_task_id ON artifact(task_id);
+    CREATE INDEX IF NOT EXISTS idx_artifact_created_at ON artifact(created_at DESC);
     """,
 }
 
