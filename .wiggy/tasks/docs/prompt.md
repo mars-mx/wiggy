@@ -90,6 +90,17 @@ write_result(
 )
 ```
 
+## Knowledge Base
+
+If your research reveals important API patterns, version constraints, or integration
+requirements that other tasks should know about, also persist them to the knowledge
+base using `write_knowledge`:
+
+- Use descriptive keys (e.g. `fastapi-routing-patterns`, `pydantic-v2-migration`)
+- Include a clear `reason` explaining what was learned and why it matters for the project
+- This is in addition to `write_result` — the knowledge base is for cross-task learnings
+  that should be discoverable by future tasks via `search_knowledge`
+
 ## Constraints
 
 - This task is part of an automated command chain
