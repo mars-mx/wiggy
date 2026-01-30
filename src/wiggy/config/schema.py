@@ -35,6 +35,10 @@ class WiggyConfig:
     pr: bool | None = None
     remote: str | None = None
 
+    # Git author settings (for commits inside Docker containers)
+    git_author_name: str | None = None
+    git_author_email: str | None = None
+
     # Embedding settings
     embedding_provider: EmbeddingProviderType | None = None
     embedding_model: str | None = None
@@ -64,6 +68,16 @@ class WiggyConfig:
             push=other.push if other.push is not None else self.push,
             pr=other.pr if other.pr is not None else self.pr,
             remote=other.remote if other.remote is not None else self.remote,
+            git_author_name=(
+                other.git_author_name
+                if other.git_author_name is not None
+                else self.git_author_name
+            ),
+            git_author_email=(
+                other.git_author_email
+                if other.git_author_email is not None
+                else self.git_author_email
+            ),
             embedding_provider=(
                 other.embedding_provider
                 if other.embedding_provider is not None
@@ -113,6 +127,8 @@ class WiggyConfig:
         pr_raw = data.get("pr")
         pr = bool(pr_raw) if pr_raw is not None else None
         remote = data.get("remote")
+        git_author_name = data.get("git_author_name")
+        git_author_email = data.get("git_author_email")
         embedding_provider_raw = data.get("embedding_provider")
         embedding_provider: EmbeddingProviderType | None = None
         if embedding_provider_raw in ("fastembed", "sentence-transformers", "openai"):
@@ -130,6 +146,8 @@ class WiggyConfig:
             push=push,
             pr=pr,
             remote=remote,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
             embedding_provider=embedding_provider,
             embedding_model=embedding_model,
         )

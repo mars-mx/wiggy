@@ -41,6 +41,12 @@ def run_home_wizard() -> WiggyConfig:
     # 6. Git Remote
     config.remote = click.prompt("Git remote name", default="origin")
 
+    # 7. Git Author Identity (for commits inside Docker containers)
+    console.print("\n[bold]Git Author Identity[/bold]")
+    console.print("[dim]Used for commits made inside Docker containers.[/dim]")
+    config.git_author_name = click.prompt("Git author name")
+    config.git_author_email = click.prompt("Git author email")
+
     # Review
     console.print("\n[bold]Review Configuration:[/bold]")
     for key, value in config.to_dict().items():
@@ -125,6 +131,20 @@ def run_local_wizard(home_config: WiggyConfig) -> WiggyConfig:
         f"Override git remote? (current: {current_remote})", default=False
     ):
         config.remote = click.prompt("Git remote name", default="origin")
+
+    # Git Author Name
+    current_name = home_config.git_author_name or "(not set)"
+    if click.confirm(
+        f"Override git author name? (current: {current_name})", default=False
+    ):
+        config.git_author_name = click.prompt("Git author name")
+
+    # Git Author Email
+    current_email = home_config.git_author_email or "(not set)"
+    if click.confirm(
+        f"Override git author email? (current: {current_email})", default=False
+    ):
+        config.git_author_email = click.prompt("Git author email")
 
     # Review
     overrides = config.to_dict()

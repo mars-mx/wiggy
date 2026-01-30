@@ -92,6 +92,8 @@ def run_process(
     model_override: str | None = None,
     prompt: str | None = None,
     worktree_info: WorktreeInfo | None = None,
+    git_author_name: str | None = None,
+    git_author_email: str | None = None,
 ) -> ProcessRun:
     """Execute a process sequentially, running each step via Docker.
 
@@ -100,6 +102,9 @@ def run_process(
         engine_name: Engine override (applied to all steps unless step overrides).
         model_override: Model override (applied to all steps unless step overrides).
         prompt: Additional user prompt appended to each step's prompt.
+        worktree_info: WorktreeInfo for git worktree to mount.
+        git_author_name: Git author name for commits inside the container.
+        git_author_email: Git author email for commits inside the container.
 
     Returns:
         ProcessRun with results for each completed step.
@@ -166,17 +171,20 @@ def run_process(
             extra_args: tuple[str, ...] = ()
 
             # Include task prompt.md if available
+            # --append-system-prompt takes a string, not a file path,
+            # so we read the file contents on the host and pass them directly.
             if task_spec.source:
                 prompt_path = task_spec.source / "prompt.md"
                 if prompt_path.exists():
-                    container_prompt_path = (
-                        f"/home/wiggy/.wiggy/tasks/{step.task}/prompt.md"
-                    )
-                    extra_args = (
-                        "--append-system-prompt",
-                        container_prompt_path,
-                        *extra_args,
-                    )
+                    task_prompt_content = prompt_path.read_text(
+                        encoding="utf-8"
+                    ).strip()
+                    if task_prompt_content:
+                        extra_args = (
+                            "--append-system-prompt",
+                            task_prompt_content,
+                            *extra_args,
+                        )
 
             # When MCP is enabled and tools are restricted, add MCP tool names
             if mcp_port is not None and allowed_tools is not None:
@@ -226,6 +234,8 @@ def run_process(
                 worktree_info=worktree_info,
                 mount_cwd=worktree_info is None,
                 mcp_port=mcp_port,
+                git_author_name=git_author_name,
+                git_author_email=git_author_email,
             )
             executor.set_task_id(task_id)
             executor.setup(resolved_engine, combined_prompt)

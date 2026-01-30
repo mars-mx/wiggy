@@ -241,3 +241,45 @@ def test_mcp_config_content(mock_docker_client, test_engine_with_mcp, tmp_path) 
     wiggy_server = content["mcpServers"]["wiggy"]
     assert "${WIGGY_MCP_PORT}" in wiggy_server["url"]
     assert wiggy_server["headers"]["X-Wiggy-Task-ID"] == "${WIGGY_TASK_ID}"
+
+
+# --- Git author identity tests ---
+
+
+def test_git_config_env_vars_set(mock_docker_client, test_engine) -> None:
+    """Test GIT_CONFIG_* env vars are set when git author name/email provided."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor(
+        git_author_name="Test User",
+        git_author_email="test@example.com",
+    )
+    executor.setup(test_engine)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    env = call_kwargs["environment"]
+    assert env["GIT_CONFIG_COUNT"] == "2"
+    assert env["GIT_CONFIG_KEY_0"] == "user.name"
+    assert env["GIT_CONFIG_VALUE_0"] == "Test User"
+    assert env["GIT_CONFIG_KEY_1"] == "user.email"
+    assert env["GIT_CONFIG_VALUE_1"] == "test@example.com"
+
+
+def test_git_config_env_vars_absent_when_not_provided(
+    mock_docker_client, test_engine
+) -> None:
+    """Test GIT_CONFIG_* env vars are absent when git author not provided."""
+    mock_container = MagicMock()
+    mock_container.short_id = "abc123"
+    mock_docker_client.containers.create.return_value = mock_container
+
+    executor = DockerExecutor()
+    executor.setup(test_engine)
+
+    call_kwargs = mock_docker_client.containers.create.call_args.kwargs
+    env = call_kwargs.get("environment")
+    if env:
+        assert "GIT_CONFIG_COUNT" not in env
+    # If env is None, that's also fine — no git config vars

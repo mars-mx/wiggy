@@ -234,8 +234,12 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_server_lifecycle_in_task_run(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -289,8 +293,12 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_port_passed_to_executor(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -340,8 +348,12 @@ class TestMCPServerLifecycleInTaskRun:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_server_stop_on_error(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -396,8 +408,12 @@ class TestMCPToolAllowlist:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_tools_added_to_allowed_tools(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -454,8 +470,12 @@ class TestMCPToolAllowlist:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_tools_not_added_when_wildcard(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,
@@ -503,8 +523,12 @@ class TestMCPToolAllowlist:
     @patch("wiggy.cli.WiggyMCPServer")
     @patch("wiggy.cli.TaskHistoryRepository")
     @patch("wiggy.cli.resolve_mcp_bind_host", return_value="127.0.0.1")
+    @patch("wiggy.cli.resolve_git_author", return_value=(None, None))
+    @patch("wiggy.cli.load_config")
     def test_mcp_tools_not_added_when_mcp_fails(
         self,
+        _mock_load_config: MagicMock,
+        _mock_git_author: MagicMock,
         _mock_bind_host: MagicMock,
         mock_repo_cls: MagicMock,
         mock_mcp_cls: MagicMock,

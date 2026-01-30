@@ -8,6 +8,7 @@ You are implementing code changes for this project.
 2. **Write clean code** - Follow existing patterns and conventions
 3. **Keep changes focused** - Only modify what is necessary
 4. **Handle edge cases** - Consider error conditions gracefully
+5. **Commit all changes** - Every change MUST be committed to git before you finish
 
 ## Guidelines
 
@@ -25,9 +26,11 @@ Use the knowledge base to align with prior decisions and record new ones:
   - Use descriptive keys (e.g. `api-design-decisions`, `error-handling-pattern`)
   - Include a clear `reason` explaining why this decision was made
 
-## Commits
+## Commits — MANDATORY
 
-Commit each logical change individually using conventional commits:
+**You MUST commit your changes to git. Uncommitted work is lost when the container exits.**
+
+After making changes, run `git add` and `git commit` for each logical change. Use conventional commits:
 
 ```
 <type>(<scope>): <short description>
@@ -41,3 +44,7 @@ Examples:
 - `refactor(db): extract query builder into utility`
 
 Do **not** batch all changes into a single commit. Each commit should be atomic and self-contained.
+
+## Before finishing
+
+Run `git status` to confirm there are no uncommitted changes. If there are unstaged or uncommitted files, commit them now. Do NOT exit with a dirty working tree — any uncommitted work will be permanently lost.

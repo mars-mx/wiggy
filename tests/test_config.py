@@ -95,6 +95,38 @@ class TestWiggyConfig:
         assert config.parallel == 4
         assert config.push is True
 
+    def test_git_author_fields_default_none(self) -> None:
+        """Test that git author fields default to None."""
+        config = WiggyConfig()
+        assert config.git_author_name is None
+        assert config.git_author_email is None
+
+    def test_git_author_roundtrip(self) -> None:
+        """Test git author fields survive to_dict/from_dict roundtrip."""
+        config = WiggyConfig(
+            git_author_name="Test User",
+            git_author_email="test@example.com",
+        )
+        data = config.to_dict()
+        assert data["git_author_name"] == "Test User"
+        assert data["git_author_email"] == "test@example.com"
+
+        restored = WiggyConfig.from_dict(data)
+        assert restored.git_author_name == "Test User"
+        assert restored.git_author_email == "test@example.com"
+
+    def test_git_author_merge(self) -> None:
+        """Test git author fields merge with correct precedence."""
+        base = WiggyConfig(
+            git_author_name="Base User",
+            git_author_email="base@example.com",
+        )
+        override = WiggyConfig(git_author_name="Override User")
+        merged = base.merge(override)
+
+        assert merged.git_author_name == "Override User"
+        assert merged.git_author_email == "base@example.com"
+
 
 class TestConfigPaths:
     """Tests for config path functions."""

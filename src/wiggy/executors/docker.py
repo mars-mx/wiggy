@@ -56,6 +56,8 @@ class DockerExecutor(Executor):
         mount_cwd: bool = False,
         global_tasks_rw: bool = False,
         mcp_port: int | None = None,
+        git_author_name: str | None = None,
+        git_author_email: str | None = None,
     ) -> None:
         self._image_override = image_override
         self._model_override = model_override
@@ -67,6 +69,8 @@ class DockerExecutor(Executor):
         self._mount_cwd = mount_cwd
         self._global_tasks_rw = global_tasks_rw
         self._mcp_port = mcp_port
+        self._git_author_name = git_author_name
+        self._git_author_email = git_author_email
         self._mcp_config_path: Path | None = None
         self._client: docker.DockerClient | None = None
         self._container: Container | None = None
@@ -165,6 +169,13 @@ class DockerExecutor(Executor):
             env["WIGGY_MCP_PORT"] = str(self._mcp_port)
         if self._task_id:
             env["WIGGY_TASK_ID"] = self._task_id
+        # Inject git identity via GIT_CONFIG_* environment variables
+        if self._git_author_name and self._git_author_email:
+            env["GIT_CONFIG_COUNT"] = "2"
+            env["GIT_CONFIG_KEY_0"] = "user.name"
+            env["GIT_CONFIG_VALUE_0"] = self._git_author_name
+            env["GIT_CONFIG_KEY_1"] = "user.email"
+            env["GIT_CONFIG_VALUE_1"] = self._git_author_email
         return env
 
     def _build_command(self, engine: Engine, prompt: str | None) -> list[str]:

@@ -31,6 +31,8 @@ def get_executor(
     mount_cwd: bool = False,
     global_tasks_rw: bool = False,
     mcp_port: int | None = None,
+    git_author_name: str | None = None,
+    git_author_email: str | None = None,
 ) -> Executor:
     """Get an executor instance by name. Defaults to docker.
 
@@ -46,6 +48,8 @@ def get_executor(
         mount_cwd: Mount current working directory as /workspace.
         global_tasks_rw: Mount global tasks directory as read-write.
         mcp_port: Port of the host-side MCP server (enables MCP integration).
+        git_author_name: Git author name for commits inside the container.
+        git_author_email: Git author email for commits inside the container.
     """
     executor_name = name or DEFAULT_EXECUTOR
     if executor_name not in EXECUTORS:
@@ -63,6 +67,8 @@ def get_executor(
             mount_cwd=mount_cwd,
             global_tasks_rw=global_tasks_rw,
             mcp_port=mcp_port,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
         )
 
     return ShellExecutor(model_override=model, executor_id=executor_id, quiet=quiet)
@@ -80,6 +86,8 @@ def get_executors(
     mount_cwd: bool = False,
     global_tasks_rw: bool = False,
     mcp_port: int | None = None,
+    git_author_name: str | None = None,
+    git_author_email: str | None = None,
 ) -> list[Executor]:
     """Get multiple executor instances of the same type for parallel execution.
 
@@ -96,6 +104,8 @@ def get_executors(
         mount_cwd: Mount current working directory as /workspace.
         global_tasks_rw: Mount global tasks directory as read-write.
         mcp_port: Port of the host-side MCP server (enables MCP integration).
+        git_author_name: Git author name for commits inside the container.
+        git_author_email: Git author email for commits inside the container.
 
     Returns:
         List of executor instances with sequential executor_ids (1, 2, 3...).
@@ -118,6 +128,8 @@ def get_executors(
             mount_cwd=mount_cwd,
             global_tasks_rw=global_tasks_rw,
             mcp_port=mcp_port,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
         )
         for i in range(1, count + 1)
     ]

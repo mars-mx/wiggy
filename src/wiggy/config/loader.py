@@ -1,10 +1,13 @@
 """Configuration file loading and merging."""
 
+import os
 from pathlib import Path
 
+import click
 import yaml
 
 from wiggy.config.schema import DEFAULT_CONFIG, WiggyConfig
+from wiggy.console import console
 
 CONFIG_FILENAME = "config.yaml"
 
@@ -87,3 +90,37 @@ def save_config(config: WiggyConfig, path: Path) -> None:
     data = config.to_dict()
     with path.open("w") as f:
         yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+
+def resolve_git_author(
+    config: WiggyConfig,
+) -> tuple[str | None, str | None]:
+    """Resolve git author name and email for Docker containers.
+
+    Precedence (highest to lowest):
+    1. WIGGY_GIT_AUTHOR_NAME / WIGGY_GIT_AUTHOR_EMAIL env vars
+    2. Config values (already merged: defaults < home < local)
+    3. Interactive prompt (saves to global config for future runs)
+
+    Returns (git_author_name, git_author_email).
+    """
+    name = os.environ.get("WIGGY_GIT_AUTHOR_NAME") or config.git_author_name
+    email = os.environ.get("WIGGY_GIT_AUTHOR_EMAIL") or config.git_author_email
+
+    if not name or not email:
+        console.print(
+            "\n[bold]Git author identity required for Docker commits.[/bold]"
+        )
+        if not name:
+            name = click.prompt("Git author name")
+        if not email:
+            email = click.prompt("Git author email")
+        # Save to global config for future runs
+        save_cfg = WiggyConfig(git_author_name=name, git_author_email=email)
+        home_path = get_home_config_path()
+        existing = load_config()
+        merged = existing.merge(save_cfg)
+        save_config(merged, home_path)
+        console.print(f"[dim]Saved git author to {home_path}[/dim]")
+
+    return name, email

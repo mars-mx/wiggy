@@ -22,6 +22,7 @@ from wiggy.config.loader import (
     home_config_exists,
     load_config,
     local_config_exists,
+    resolve_git_author,
 )
 from wiggy.config.preflight import run_all_checks
 from wiggy.config.wizard import run_home_wizard, run_local_wizard, show_current_config
@@ -417,6 +418,12 @@ def run(
             console.print(f"[red]Worktree error: {e}[/red]")
             raise SystemExit(1) from None
 
+    # Resolve git author identity for Docker containers
+    git_author_name: str | None = None
+    git_author_email: str | None = None
+    if executor == "docker":
+        git_author_name, git_author_email = resolve_git_author(config)
+
     console.print(
         f"[bold green]Starting wiggy loop with {resolved_engine.name}...[/bold green]"
     )
@@ -458,6 +465,8 @@ def run(
             quiet=True,
             worktree_infos=worktree_infos if worktree_infos else None,
             mcp_port=mcp_port,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
         )
 
         # Generate task_ids, create task log records
@@ -1016,6 +1025,10 @@ def task_run(
             container_prompt_path = f"/home/wiggy/.wiggy/tasks/{task_name}/prompt.md"
             extra_args = ("--append-system-prompt", container_prompt_path)
 
+    # Resolve git author identity for Docker containers
+    config = load_config()
+    git_author_name, git_author_email = resolve_git_author(config)
+
     console.print(f"[bold green]Running task: {task_name}[/bold green]")
     console.print(f"[dim]Engine: {resolved_engine.name}[/dim]")
     if effective_model:
@@ -1086,6 +1099,8 @@ def task_run(
             allowed_tools=allowed_tools,
             mount_cwd=True,
             mcp_port=mcp_port,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
         )
 
         executor = executors[0]
@@ -1397,6 +1412,9 @@ def process_run(
         console.print(f"[red]Worktree error: {e}[/red]")
         raise SystemExit(1) from None
 
+    # Resolve git author identity for Docker containers
+    git_author_name, git_author_email = resolve_git_author(config)
+
     console.print(f"[bold green]Running process: {name}[/bold green]")
     console.print(f"[dim]Steps: {len(spec.steps)}[/dim]")
     if engine:
@@ -1414,6 +1432,8 @@ def process_run(
             model_override=model,
             prompt=prompt,
             worktree_info=worktree_info,
+            git_author_name=git_author_name,
+            git_author_email=git_author_email,
         )
     except Exception:
         # Cleanup worktree on unexpected error
