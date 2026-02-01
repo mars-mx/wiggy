@@ -615,7 +615,13 @@ def run(
                     console.print(
                         f"[dim]Creating pull request for {info.branch}...[/dim]"
                     )
-                    pr_url = git_ops.create_pull_request()
+                    commits = git_ops.get_commit_messages()
+                    body = (
+                        "\n".join(f"- {msg}" for msg in commits)
+                        if commits
+                        else None
+                    )
+                    pr_url = git_ops.create_pull_request(body=body)
                     if pr_url:
                         console.print(f"[green]PR created: {pr_url}[/green]")
                     else:

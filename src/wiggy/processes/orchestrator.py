@@ -691,6 +691,21 @@ def run_process(
                 process_run.pr_body = artifact.content
                 break
 
+        # Fallback: use finalize task's write_result if no artifact found
+        if not process_run.pr_body:
+            finalize_result = repo.get_result_by_task_name(
+                "orchestrator-finalize", process_id
+            )
+            if finalize_result and finalize_result.result_text:
+                process_run.pr_body = finalize_result.result_text
+                logger.info(
+                    "Using finalize task result as PR body (no pr_description artifact)"
+                )
+            else:
+                logger.warning(
+                    "No pr_description artifact or finalize result found for PR body"
+                )
+
     finally:
         try:
             mcp_server.stop()
