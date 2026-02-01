@@ -271,12 +271,15 @@ def _run_orchestrator_phase(
         executor.set_task_id(task_id)
         executor.setup(resolved_engine, context_prompt)
 
+        output_lines: list[str] = []
         try:
             for msg in executor.run():
                 if monitor:
                     monitor.update(1, msg)
                 elif msg.content:
                     console.print(msg.content)
+                if msg.content and phase == "finalize":
+                    output_lines.append(msg.content)
         finally:
             executor.teardown()
 
@@ -298,6 +301,29 @@ def _run_orchestrator_phase(
             input_tokens=summary.input_tokens if summary else None,
             output_tokens=summary.output_tokens if summary else None,
         )
+
+        # For finalize phase, ensure the text output is stored as a result
+        # so the PR body fallback can find it even if the agent didn't
+        # explicitly call write_result or write_artifact.
+        if phase == "finalize" and output_lines:
+            try:
+                existing = repo.get_result_by_task_name(
+                    "orchestrator-finalize", process_run.process_id
+                )
+                if not existing:
+                    finalize_text = "\n".join(output_lines)
+                    repo.create_result(
+                        task_id=task_id,
+                        result_text=finalize_text,
+                        tags=["pr-body-fallback"],
+                    )
+                    logger.info(
+                        "Stored finalize output as task result (fallback for PR body)"
+                    )
+            except Exception:
+                logger.debug(
+                    "Failed to store finalize output as result", exc_info=True
+                )
 
         # Post-step phase is purely informational — no decision expected
         if phase == "post_step":
@@ -690,6 +716,21 @@ def run_process(
             if artifact.template_name == "pr_description":
                 process_run.pr_body = artifact.content
                 break
+
+        # Fallback: use finalize task's write_result if no artifact found
+        if not process_run.pr_body:
+            finalize_result = repo.get_result_by_task_name(
+                "orchestrator-finalize", process_id
+            )
+            if finalize_result and finalize_result.result_text:
+                process_run.pr_body = finalize_result.result_text
+                logger.info(
+                    "Using finalize task result as PR body (no pr_description artifact)"
+                )
+            else:
+                logger.warning(
+                    "No pr_description artifact or finalize result found for PR body"
+                )
 
     finally:
         try:

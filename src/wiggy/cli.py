@@ -615,7 +615,13 @@ def run(
                     console.print(
                         f"[dim]Creating pull request for {info.branch}...[/dim]"
                     )
-                    pr_url = git_ops.create_pull_request()
+                    commits = git_ops.get_commit_messages()
+                    body = (
+                        "\n".join(f"- {msg}" for msg in commits)
+                        if commits
+                        else None
+                    )
+                    pr_url = git_ops.create_pull_request(body=body)
                     if pr_url:
                         console.print(f"[green]PR created: {pr_url}[/green]")
                     else:
@@ -1511,8 +1517,14 @@ def process_run(
             console.print(
                 f"[dim]Creating pull request for {worktree_info.branch}...[/dim]"
             )
+            pr_body = process_run_result.pr_body
+            if not pr_body:
+                # Fallback: build body from commit messages
+                commits = git_ops.get_commit_messages()
+                if commits:
+                    pr_body = "\n".join(f"- {msg}" for msg in commits)
             pr_url = git_ops.create_pull_request(
-                body=process_run_result.pr_body,
+                body=pr_body,
             )
             if pr_url:
                 console.print(f"[green]PR created: {pr_url}[/green]")
