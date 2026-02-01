@@ -144,6 +144,7 @@ def _run_orchestrator_phase(
     git_author_name: str | None,
     git_author_email: str | None,
     monitor: Monitor | None = None,
+    prompt: str | None = None,
 ) -> OrchestratorDecision | None:
     """Run a single orchestrator phase (pre_step, post_step, or finalize).
 
@@ -180,6 +181,11 @@ def _run_orchestrator_phase(
         context_prompt = build_orchestrator_context_prompt(
             process_run, phase, step_index
         )
+
+        # Include user prompt in the context so the orchestrator knows
+        # what feature/task is being worked on.
+        if prompt:
+            context_prompt += f"\n\nUser prompt:\n{prompt}"
 
         # Build extra_args with task prompt
         extra_args: tuple[str, ...] = ()
@@ -419,6 +425,7 @@ def run_process(
                     git_author_name,
                     git_author_email,
                     monitor=monitor,
+                    prompt=prompt,
                 )
                 if decision:
                     process_run.orchestrator_decisions.append(decision)
@@ -633,6 +640,7 @@ def run_process(
                     git_author_name,
                     git_author_email,
                     monitor=monitor,
+                    prompt=prompt,
                 )
 
             if success:
@@ -673,6 +681,7 @@ def run_process(
                 git_author_name,
                 git_author_email,
                 monitor=monitor,
+                prompt=prompt,
             )
 
         # Query for pr_description artifact to populate pr_body
