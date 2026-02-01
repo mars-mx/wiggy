@@ -1,0 +1,11 @@
+name: fix
+description: |
+  Debug and fix an issue: analyze the codebase to understand context,
+  debug to identify the root cause, implement the fix, run tests to
+  verify, and review the result.
+steps:
+  - task: analyse
+  - task: debug
+  - task: implement
+  - task: test
+  - task: review

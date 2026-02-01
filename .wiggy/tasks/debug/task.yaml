@@ -1,0 +1,6 @@
+name: debug
+description: |
+  Debug and diagnose the root cause of an issue by reproducing it,
+  tracing through code paths, and identifying the exact failure point.
+tools:
+  - "*"
