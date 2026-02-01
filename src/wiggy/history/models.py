@@ -37,6 +37,7 @@ class TaskLog:
     exit_code: int | None = None
     error_message: str | None = None
     parent_id: str | None = None
+    is_orchestrator: bool = False
 
     @property
     def log_path(self) -> Path:
@@ -108,6 +109,9 @@ class TaskLog:
             exit_code=row["exit_code"],
             error_message=row["error_message"],
             parent_id=row["parent_id"],
+            is_orchestrator=bool(row["is_orchestrator"])
+            if row["is_orchestrator"] is not None
+            else False,
         )
 
 

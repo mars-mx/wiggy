@@ -1,0 +1,4 @@
+name: orchestrator-finalize
+description: Process orchestrator - finalization and PR description generation
+tools:
+  - "*"

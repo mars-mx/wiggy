@@ -5,7 +5,7 @@ from sqlite3 import Connection
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 DEFAULT_EMBEDDING_DIM = 768
 
@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS task_log (
     error_message TEXT,
 
     parent_id TEXT,                     -- References task_log.task_id
+    is_orchestrator INTEGER NOT NULL DEFAULT 0,
 
     FOREIGN KEY (parent_id) REFERENCES task_log(task_id)
 );
@@ -108,6 +109,21 @@ CREATE TABLE IF NOT EXISTS knowledge (
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_key ON knowledge(key);
 CREATE INDEX IF NOT EXISTS idx_knowledge_key_version ON knowledge(key, version DESC);
+
+CREATE TABLE IF NOT EXISTS orchestrator_decision (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    process_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    phase TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    decision TEXT NOT NULL,
+    reasoning TEXT NOT NULL,
+    injected_steps TEXT,              -- JSON serialized
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_log(task_id)
+);
+CREATE INDEX IF NOT EXISTS idx_orchestrator_decision_process_id
+    ON orchestrator_decision(process_id);
 """
 
 # Migrations: key is "from_version", value is SQL to apply
@@ -195,6 +211,35 @@ def _ensure_vec_tables(conn: Connection, embedding_dim: int) -> None:
             )
 
 
+def _migrate_v4_to_v5(conn: Connection) -> None:
+    """Migrate schema from v4 to v5: add orchestrator support."""
+    # ALTER TABLE doesn't support IF NOT EXISTS, so check first
+    cursor = conn.execute("PRAGMA table_info(task_log)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "is_orchestrator" not in columns:
+        conn.execute(
+            "ALTER TABLE task_log ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS orchestrator_decision (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            process_id TEXT NOT NULL,
+            task_id TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            step_index INTEGER NOT NULL,
+            decision TEXT NOT NULL,
+            reasoning TEXT NOT NULL,
+            injected_steps TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (task_id) REFERENCES task_log(task_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_orchestrator_decision_process_id
+            ON orchestrator_decision(process_id);
+    """
+    )
+
+
 def _migrate_v3_to_v4(conn: Connection, embedding_dim: int) -> None:
     """Migrate schema from v3 to v4: add knowledge table and vec tables."""
     conn.executescript(
@@ -263,6 +308,8 @@ def migrate_if_needed(
             conn.executescript(MIGRATIONS[current_version])
         elif current_version == 3:
             _migrate_v3_to_v4(conn, embedding_dim)
+        elif current_version == 4:
+            _migrate_v4_to_v5(conn)
         current_version += 1
         conn.execute("UPDATE schema_version SET version = ?", (current_version,))
         conn.commit()

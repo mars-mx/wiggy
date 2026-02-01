@@ -14,7 +14,13 @@ from wiggy.config.loader import (
     local_config_exists,
     save_config,
 )
-from wiggy.config.schema import DEFAULT_CONFIG, WiggyConfig
+from wiggy.config.schema import (
+    DEFAULT_CONFIG,
+    OrchestratorConfig,
+    WiggyConfig,
+    resolve_orchestrator_config,
+)
+from wiggy.processes.base import ProcessSpec, ProcessStep
 
 
 class TestWiggyConfig:
@@ -316,3 +322,260 @@ class TestConfigSaving:
             data = yaml.safe_load(f)
         assert "engine" in data
         assert "model" not in data
+
+
+class TestOrchestratorConfig:
+    """Tests for OrchestratorConfig dataclass."""
+
+    def test_defaults(self) -> None:
+        """Test default values."""
+        cfg = OrchestratorConfig()
+        assert cfg.enabled is True
+        assert cfg.engine is None
+        assert cfg.model == "opus"
+        assert cfg.max_injections == 3
+        assert cfg.image is None
+
+    def test_from_dict_full(self) -> None:
+        """Test from_dict with all fields specified."""
+        data = {
+            "enabled": False,
+            "engine": "claude",
+            "model": "sonnet",
+            "max_injections": 5,
+            "image": "custom:latest",
+        }
+        cfg = OrchestratorConfig.from_dict(data)
+        assert cfg.enabled is False
+        assert cfg.engine == "claude"
+        assert cfg.model == "sonnet"
+        assert cfg.max_injections == 5
+        assert cfg.image == "custom:latest"
+
+    def test_from_dict_partial_uses_defaults(self) -> None:
+        """Test from_dict with partial data uses defaults."""
+        cfg = OrchestratorConfig.from_dict({"enabled": False})
+        assert cfg.enabled is False
+        assert cfg.model == "opus"
+        assert cfg.max_injections == 3
+
+    def test_from_dict_empty_uses_defaults(self) -> None:
+        """Test from_dict with empty dict uses all defaults."""
+        cfg = OrchestratorConfig.from_dict({})
+        assert cfg.enabled is True
+        assert cfg.model == "opus"
+        assert cfg.max_injections == 3
+
+    def test_to_dict_roundtrip(self) -> None:
+        """Test to_dict/from_dict roundtrip."""
+        cfg = OrchestratorConfig(
+            enabled=True, engine="claude", model="opus", max_injections=3
+        )
+        data = cfg.to_dict()
+        restored = OrchestratorConfig.from_dict(data)
+        assert restored == cfg
+
+    def test_overlay_replaces_non_none_fields(self) -> None:
+        """Test that overlay applies non-None fields from other."""
+        base = OrchestratorConfig(engine="claude", model="opus", max_injections=3)
+        override = OrchestratorConfig(engine="opencode", model="sonnet", max_injections=5)
+        result = base.overlay(override)
+        assert result.engine == "opencode"
+        assert result.model == "sonnet"
+        assert result.max_injections == 5
+
+    def test_overlay_preserves_base_when_other_is_none(self) -> None:
+        """Test that overlay keeps base fields when other has None."""
+        base = OrchestratorConfig(engine="claude", model="opus", image="myimg:1")
+        override = OrchestratorConfig(engine=None, model=None, image=None)
+        result = base.overlay(override)
+        assert result.engine == "claude"
+        assert result.model == "opus"
+        assert result.image == "myimg:1"
+
+
+class TestOrchestratorInWiggyConfig:
+    """Tests for orchestrator field in WiggyConfig."""
+
+    def test_default_orchestrator(self) -> None:
+        """Test WiggyConfig has default OrchestratorConfig."""
+        cfg = WiggyConfig()
+        assert cfg.orchestrator.enabled is True
+        assert cfg.orchestrator.model == "opus"
+
+    def test_from_dict_with_orchestrator(self) -> None:
+        """Test WiggyConfig.from_dict parses orchestrator section."""
+        data = {
+            "engine": "claude",
+            "orchestrator": {
+                "enabled": True,
+                "model": "opus",
+                "max_injections": 5,
+            },
+        }
+        cfg = WiggyConfig.from_dict(data)
+        assert cfg.engine == "claude"
+        assert cfg.orchestrator.enabled is True
+        assert cfg.orchestrator.max_injections == 5
+
+    def test_from_dict_without_orchestrator(self) -> None:
+        """Test WiggyConfig.from_dict uses defaults when orchestrator missing."""
+        cfg = WiggyConfig.from_dict({"engine": "claude"})
+        assert cfg.orchestrator == OrchestratorConfig()
+
+    def test_to_dict_includes_orchestrator(self) -> None:
+        """Test WiggyConfig.to_dict includes orchestrator section."""
+        cfg = WiggyConfig(engine="claude")
+        data = cfg.to_dict()
+        assert "orchestrator" in data
+        assert data["orchestrator"]["enabled"] is True
+
+    def test_merge_overlays_orchestrator(self) -> None:
+        """Test WiggyConfig.merge overlays orchestrator config."""
+        base = WiggyConfig(
+            orchestrator=OrchestratorConfig(engine="claude", max_injections=3)
+        )
+        override = WiggyConfig(
+            orchestrator=OrchestratorConfig(engine="opencode", max_injections=5)
+        )
+        merged = base.merge(override)
+        assert merged.orchestrator.engine == "opencode"
+        assert merged.orchestrator.max_injections == 5
+
+    def test_parse_from_yaml(self, tmp_path: Path) -> None:
+        """Test parsing orchestrator config from YAML file."""
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "engine: claude\n"
+            "orchestrator:\n"
+            "  enabled: true\n"
+            "  engine: claude\n"
+            "  model: opus\n"
+            "  max_injections: 3\n"
+        )
+        data = load_yaml_config(config_file)
+        assert data is not None
+        cfg = WiggyConfig.from_dict(data)
+        assert cfg.orchestrator.enabled is True
+        assert cfg.orchestrator.engine == "claude"
+        assert cfg.orchestrator.model == "opus"
+        assert cfg.orchestrator.max_injections == 3
+
+
+class TestResolveOrchestratorConfig:
+    """Tests for resolve_orchestrator_config helper."""
+
+    def test_global_only(self) -> None:
+        """Test resolution with global config only (no process override)."""
+        global_cfg = WiggyConfig(
+            orchestrator=OrchestratorConfig(engine="claude", max_injections=3)
+        )
+        result = resolve_orchestrator_config(global_cfg, None)
+        assert result.engine == "claude"
+        assert result.max_injections == 3
+
+    def test_process_override(self) -> None:
+        """Test resolution with process-level override."""
+        global_cfg = WiggyConfig(
+            orchestrator=OrchestratorConfig(engine="claude", max_injections=3)
+        )
+        process_orch = OrchestratorConfig(engine="opencode", max_injections=5)
+        result = resolve_orchestrator_config(global_cfg, process_orch)
+        assert result.engine == "opencode"
+        assert result.max_injections == 5
+
+    def test_field_level_overlay(self) -> None:
+        """Test that process override only replaces non-None fields."""
+        global_cfg = WiggyConfig(
+            orchestrator=OrchestratorConfig(
+                engine="claude", model="opus", image="base:1"
+            )
+        )
+        process_orch = OrchestratorConfig(engine=None, model="sonnet", image=None)
+        result = resolve_orchestrator_config(global_cfg, process_orch)
+        assert result.engine == "claude"  # preserved from global
+        assert result.model == "sonnet"  # overridden by process
+        assert result.image == "base:1"  # preserved from global
+
+
+class TestProcessStepSkipOrchestrator:
+    """Tests for skip_orchestrator on ProcessStep."""
+
+    def test_default_false(self) -> None:
+        """Test skip_orchestrator defaults to False."""
+        step = ProcessStep(task="implement")
+        assert step.skip_orchestrator is False
+
+    def test_from_dict_skip_true(self) -> None:
+        """Test parsing skip_orchestrator=true from dict."""
+        step = ProcessStep.from_dict({"task": "format", "skip_orchestrator": True})
+        assert step.skip_orchestrator is True
+
+    def test_from_dict_skip_missing(self) -> None:
+        """Test skip_orchestrator defaults when not in dict."""
+        step = ProcessStep.from_dict({"task": "implement"})
+        assert step.skip_orchestrator is False
+
+    def test_to_dict_includes_skip_when_true(self) -> None:
+        """Test to_dict includes skip_orchestrator when True."""
+        step = ProcessStep(task="format", skip_orchestrator=True)
+        data = step.to_dict()
+        assert data["skip_orchestrator"] is True
+
+    def test_to_dict_excludes_skip_when_false(self) -> None:
+        """Test to_dict excludes skip_orchestrator when False."""
+        step = ProcessStep(task="implement")
+        data = step.to_dict()
+        assert "skip_orchestrator" not in data
+
+
+class TestProcessSpecOrchestrator:
+    """Tests for orchestrator override on ProcessSpec."""
+
+    def test_default_none(self) -> None:
+        """Test orchestrator defaults to None on ProcessSpec."""
+        spec = ProcessSpec(name="test", steps=())
+        assert spec.orchestrator is None
+
+    def test_from_dict_with_orchestrator(self) -> None:
+        """Test parsing orchestrator from process.yaml dict."""
+        data = {
+            "name": "implement-feature",
+            "orchestrator": {"enabled": True, "model": "opus", "max_injections": 5},
+            "steps": [
+                {"task": "analyse"},
+                {"task": "implement"},
+                {"task": "review"},
+            ],
+        }
+        spec = ProcessSpec.from_dict(data)
+        assert spec.orchestrator is not None
+        assert spec.orchestrator.enabled is True
+        assert spec.orchestrator.model == "opus"
+        assert spec.orchestrator.max_injections == 5
+
+    def test_from_dict_without_orchestrator(self) -> None:
+        """Test ProcessSpec without orchestrator section."""
+        data = {
+            "name": "simple",
+            "steps": [{"task": "run"}],
+        }
+        spec = ProcessSpec.from_dict(data)
+        assert spec.orchestrator is None
+
+    def test_to_dict_includes_orchestrator(self) -> None:
+        """Test to_dict includes orchestrator when set."""
+        spec = ProcessSpec(
+            name="test",
+            steps=(),
+            orchestrator=OrchestratorConfig(enabled=True, max_injections=5),
+        )
+        data = spec.to_dict()
+        assert "orchestrator" in data
+        assert data["orchestrator"]["max_injections"] == 5
+
+    def test_to_dict_excludes_orchestrator_when_none(self) -> None:
+        """Test to_dict excludes orchestrator when None."""
+        spec = ProcessSpec(name="test", steps=())
+        data = spec.to_dict()
+        assert "orchestrator" not in data

@@ -1,13 +1,19 @@
 """Task history repository for database operations."""
 
+from __future__ import annotations
+
 import json
 import sqlite3
 import struct
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from wiggy.history.embeddings import EmbeddingProvider, get_provider
 from wiggy.history.models import Artifact, Knowledge, SearchResult, TaskLog, TaskResult
+
+if TYPE_CHECKING:
+    from wiggy.processes.base import OrchestratorDecision
 from wiggy.history.schema import migrate_if_needed
 
 
@@ -81,10 +87,10 @@ class TaskHistoryRepository:
                     failed_at, branch, worktree, main_repo, engine, model,
                     session_id, task_name, prompt, prompt_hash, total_cost,
                     input_tokens, output_tokens, duration_ms, success,
-                    exit_code, error_message, parent_id
+                    exit_code, error_message, parent_id, is_orchestrator
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -111,6 +117,7 @@ class TaskHistoryRepository:
                     task.exit_code,
                     task.error_message,
                     task.parent_id,
+                    1 if task.is_orchestrator else 0,
                 ),
             )
             conn.commit()
@@ -565,6 +572,93 @@ class TaskHistoryRepository:
                 (key,),
             )
             return [Knowledge.from_row(row) for row in cursor.fetchall()]
+
+    # Orchestrator decision operations
+
+    def save_orchestrator_decision(
+        self, process_id: str, decision: OrchestratorDecision
+    ) -> None:
+        """Persist an orchestrator decision."""
+        injected_json: str | None = None
+        if decision.injected_steps:
+            injected_json = json.dumps(
+                [step.to_dict() for step in decision.injected_steps]
+            )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO orchestrator_decision (
+                    process_id, task_id, phase, step_index,
+                    decision, reasoning, injected_steps, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    process_id,
+                    decision.task_id,
+                    decision.phase,
+                    decision.step_index,
+                    decision.decision,
+                    decision.reasoning,
+                    injected_json,
+                    decision.created_at,
+                ),
+            )
+            conn.commit()
+
+    def get_orchestrator_decisions(self, process_id: str) -> list[OrchestratorDecision]:
+        """Get all orchestrator decisions for a process, ordered by creation time."""
+        from wiggy.processes.base import OrchestratorDecision, ProcessStep
+
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM orchestrator_decision WHERE process_id = ? "
+                "ORDER BY created_at",
+                (process_id,),
+            )
+            results: list[OrchestratorDecision] = []
+            for row in cursor.fetchall():
+                injected_raw = row["injected_steps"]
+                injected: tuple[ProcessStep, ...] = ()
+                if injected_raw:
+                    injected = tuple(
+                        ProcessStep.from_dict(s) for s in json.loads(injected_raw)
+                    )
+                results.append(
+                    OrchestratorDecision(
+                        phase=row["phase"],
+                        step_index=row["step_index"],
+                        decision=row["decision"],
+                        reasoning=row["reasoning"],
+                        injected_steps=injected,
+                        task_id=row["task_id"],
+                        created_at=row["created_at"],
+                    )
+                )
+            return results
+
+    def get_earliest_ref_for_process(self, process_id: str) -> str | None:
+        """Get the earliest commit hash across all tasks in a process.
+
+        Joins task_refs with task_log to find the first commit recorded
+        for any task belonging to the given process.
+
+        Returns:
+            The commit hash string, or None if no refs exist.
+        """
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                SELECT tr.commit_hash
+                FROM task_refs tr
+                JOIN task_log tl ON tr.task_id = tl.task_id
+                WHERE tl.process_id = ?
+                ORDER BY tr.created_at ASC
+                LIMIT 1
+                """,
+                (process_id,),
+            )
+            row = cursor.fetchone()
+            return row["commit_hash"] if row else None
 
     # Private embedding methods
 

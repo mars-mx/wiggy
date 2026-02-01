@@ -1,0 +1,4 @@
+name: orchestrator-post
+description: Process orchestrator - post-step review and assessment
+tools:
+  - "*"

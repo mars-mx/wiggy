@@ -1434,6 +1434,7 @@ def process_run(
             worktree_info=worktree_info,
             git_author_name=git_author_name,
             git_author_email=git_author_email,
+            config=config,
         )
     except Exception:
         # Cleanup worktree on unexpected error
@@ -1498,7 +1499,9 @@ def process_run(
             console.print(
                 f"[dim]Creating pull request for {worktree_info.branch}...[/dim]"
             )
-            pr_url = git_ops.create_pull_request()
+            pr_url = git_ops.create_pull_request(
+                body=process_run_result.pr_body,
+            )
             if pr_url:
                 console.print(f"[green]PR created: {pr_url}[/green]")
             else:

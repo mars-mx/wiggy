@@ -27,5 +27,6 @@ __all__ = [
 # Default template names for reference
 DEFAULT_TEMPLATES: tuple[str, ...] = (
     "documentation",
+    "pr_description",
     "prd",
 )

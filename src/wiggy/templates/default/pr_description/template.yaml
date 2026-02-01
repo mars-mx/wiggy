@@ -1,0 +1,6 @@
+name: pr_description
+description: Pull request description template
+format: markdown
+tags:
+  - pr
+  - git

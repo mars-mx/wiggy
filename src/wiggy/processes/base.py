@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from wiggy.config.schema import OrchestratorConfig
     from wiggy.git.worktree import WorktreeInfo
 
 
@@ -22,6 +23,8 @@ class ProcessStep:
     model: str | None = None
     tools: tuple[str, ...] | None = None
     prompt: str | None = None
+    skip_orchestrator: bool = False
+    origin_step_index: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict, omitting None fields."""
@@ -34,6 +37,10 @@ class ProcessStep:
             result["tools"] = list(self.tools)
         if self.prompt is not None:
             result["prompt"] = self.prompt
+        if self.skip_orchestrator:
+            result["skip_orchestrator"] = True
+        if self.origin_step_index is not None:
+            result["origin_step_index"] = self.origin_step_index
         return result
 
     @classmethod
@@ -47,12 +54,20 @@ class ProcessStep:
             else:
                 tools = None
 
+        skip_orchestrator_raw = data.get("skip_orchestrator", False)
+        skip_orchestrator = bool(skip_orchestrator_raw)
+
+        origin_raw = data.get("origin_step_index")
+        origin_step_index = int(origin_raw) if origin_raw is not None else None
+
         return cls(
             task=str(data["task"]),
             engine=data.get("engine"),
             model=data.get("model"),
             tools=tools,
             prompt=data.get("prompt"),
+            skip_orchestrator=skip_orchestrator,
+            origin_step_index=origin_step_index,
         )
 
 
@@ -67,6 +82,7 @@ class ProcessSpec:
     steps: tuple[ProcessStep, ...]
     description: str = ""
     source: Path | None = None
+    orchestrator: OrchestratorConfig | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict, excluding source."""
@@ -75,19 +91,43 @@ class ProcessSpec:
             "description": self.description,
             "steps": [step.to_dict() for step in self.steps],
         }
+        if self.orchestrator is not None:
+            result["orchestrator"] = self.orchestrator.to_dict()
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], source: Path | None = None) -> ProcessSpec:
         """Deserialize from dict."""
+        from wiggy.config.schema import OrchestratorConfig
+
         steps_raw = data.get("steps", [])
         steps = tuple(ProcessStep.from_dict(s) for s in steps_raw)
+        orchestrator_raw = data.get("orchestrator")
+        orchestrator = (
+            OrchestratorConfig.from_dict(orchestrator_raw)
+            if isinstance(orchestrator_raw, dict)
+            else None
+        )
         return cls(
             name=str(data.get("name", "")),
             description=str(data.get("description", "")),
             steps=steps,
             source=source,
+            orchestrator=orchestrator,
         )
+
+
+@dataclass(frozen=True)
+class OrchestratorDecision:
+    """A decision made by the orchestrator at a given phase of process execution."""
+
+    phase: str  # "pre_step", "post_step", "finalize"
+    step_index: int
+    decision: str  # "proceed", "inject", "abort"
+    reasoning: str
+    injected_steps: tuple[ProcessStep, ...] = ()
+    task_id: str = ""  # orchestrator's own task_id
+    created_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -115,6 +155,8 @@ class ProcessRun:
     results: list[StepResult] = field(default_factory=list)
     current_index: int = 0
     worktree_info: WorktreeInfo | None = None
+    orchestrator_decisions: list[OrchestratorDecision] = field(default_factory=list)
+    pr_body: str | None = None
 
     def __post_init__(self) -> None:
         self.steps = list(self.spec.steps)

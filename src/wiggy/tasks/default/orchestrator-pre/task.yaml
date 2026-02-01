@@ -1,0 +1,4 @@
+name: orchestrator-pre
+description: Process orchestrator - pre-step planning and decision
+tools:
+  - "*"
