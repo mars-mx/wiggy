@@ -499,7 +499,13 @@ def run(
             console.print(f"[dim]Task {task_id} created for executor {i}[/dim]")
 
         # Create monitor for real-time status display
-        monitor = Monitor(resolved_engine.name, parallel, model=model)
+        monitor = Monitor(
+            resolved_engine.name,
+            parallel,
+            model=model,
+            mcp_host=mcp_bind_host if mcp_port else None,
+            mcp_port=mcp_port,
+        )
 
         # Queue for messages from executor threads: (executor_id, message or None)
         queue: Queue[tuple[int, ParsedMessage | None]] = Queue()
@@ -1415,16 +1421,22 @@ def process_run(
     # Resolve git author identity for Docker containers
     git_author_name, git_author_email = resolve_git_author(config)
 
-    console.print(f"[bold green]Running process: {name}[/bold green]")
-    console.print(f"[dim]Steps: {len(spec.steps)}[/dim]")
-    if engine:
-        console.print(f"[dim]Engine: {engine}[/dim]")
-    if model:
-        console.print(f"[dim]Model: {model}[/dim]")
-    if prompt:
-        console.print(f"[dim]Prompt: {prompt}[/dim]")
+    # Resolve engine name for monitor display
+    _resolved_engine_for_monitor = resolve_engine(engine)
+    _engine_display = _resolved_engine_for_monitor.name if _resolved_engine_for_monitor else (engine or "unknown")
+
+    # Create monitor for the process
+    step_names = [step.task for step in spec.steps]
+    process_monitor = Monitor(
+        _engine_display,
+        executor_count=1,
+        model=model,
+        process_name=name,
+        step_names=step_names,
+    )
 
     start_time = datetime.now(UTC)
+    process_monitor.start()
     try:
         process_run_result = run_process(
             process_spec=spec,
@@ -1435,8 +1447,10 @@ def process_run(
             git_author_name=git_author_name,
             git_author_email=git_author_email,
             config=config,
+            monitor=process_monitor,
         )
     except Exception:
+        process_monitor.stop()
         # Cleanup worktree on unexpected error
         if worktree_info and not keep_worktree and wt_manager and not worktree:
             console.print(f"[dim]Removing worktree: {worktree_info.path}[/dim]")
@@ -1447,6 +1461,7 @@ def process_run(
                     f"[yellow]Failed to remove worktree: {wt_err}[/yellow]"
                 )
         raise
+    process_monitor.stop()
     end_time = datetime.now(UTC)
 
     # Print summary
