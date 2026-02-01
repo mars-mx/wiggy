@@ -1450,7 +1450,6 @@ def process_run(
             monitor=process_monitor,
         )
     except Exception:
-        process_monitor.stop()
         # Cleanup worktree on unexpected error
         if worktree_info and not keep_worktree and wt_manager and not worktree:
             console.print(f"[dim]Removing worktree: {worktree_info.path}[/dim]")
@@ -1461,7 +1460,8 @@ def process_run(
                     f"[yellow]Failed to remove worktree: {wt_err}[/yellow]"
                 )
         raise
-    process_monitor.stop()
+    finally:
+        process_monitor.stop()
     end_time = datetime.now(UTC)
 
     # Print summary
