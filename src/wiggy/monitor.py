@@ -247,10 +247,7 @@ class Monitor:
             message: The parsed message to display.
         """
         # Skip non-displayable message types
-        if (
-            message.message_type == MessageType.STREAM_EVENT
-            or message.message_type == MessageType.RAW
-        ):
+        if message.message_type in (MessageType.STREAM_EVENT, MessageType.RAW):
             return
 
         action = _parse_action(message)
