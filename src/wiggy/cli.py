@@ -499,7 +499,13 @@ def run(
             console.print(f"[dim]Task {task_id} created for executor {i}[/dim]")
 
         # Create monitor for real-time status display
-        monitor = Monitor(resolved_engine.name, parallel, model=model)
+        monitor = Monitor(
+            resolved_engine.name,
+            parallel,
+            model=model,
+            mcp_host=mcp_bind_host if mcp_port else None,
+            mcp_port=mcp_port,
+        )
 
         # Queue for messages from executor threads: (executor_id, message or None)
         queue: Queue[tuple[int, ParsedMessage | None]] = Queue()
@@ -1415,16 +1421,19 @@ def process_run(
     # Resolve git author identity for Docker containers
     git_author_name, git_author_email = resolve_git_author(config)
 
-    console.print(f"[bold green]Running process: {name}[/bold green]")
-    console.print(f"[dim]Steps: {len(spec.steps)}[/dim]")
-    if engine:
-        console.print(f"[dim]Engine: {engine}[/dim]")
-    if model:
-        console.print(f"[dim]Model: {model}[/dim]")
-    if prompt:
-        console.print(f"[dim]Prompt: {prompt}[/dim]")
+    # Create monitor for the process
+    # Use engine name directly for display - actual resolution happens in run_process
+    step_names = [step.task for step in spec.steps]
+    process_monitor = Monitor(
+        engine or "auto",
+        executor_count=1,
+        model=model,
+        process_name=name,
+        step_names=step_names,
+    )
 
     start_time = datetime.now(UTC)
+    process_monitor.start()
     try:
         process_run_result = run_process(
             process_spec=spec,
@@ -1435,6 +1444,7 @@ def process_run(
             git_author_name=git_author_name,
             git_author_email=git_author_email,
             config=config,
+            monitor=process_monitor,
         )
     except Exception:
         # Cleanup worktree on unexpected error
@@ -1447,6 +1457,8 @@ def process_run(
                     f"[yellow]Failed to remove worktree: {wt_err}[/yellow]"
                 )
         raise
+    finally:
+        process_monitor.stop()
     end_time = datetime.now(UTC)
 
     # Print summary
