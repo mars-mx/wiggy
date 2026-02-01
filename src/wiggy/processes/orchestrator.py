@@ -230,16 +230,24 @@ def _run_orchestrator_phase(
 
         # Create executor and run
         orch_label = f"orchestrator-{suffix}"
-        step_label = f"Step {step_index + 1}/{len(process_run.steps)}"
+        if suffix == "finalize":
+            step_label = "Finalize"
+        else:
+            step_label = f"Step {step_index + 1}/{len(process_run.steps)}"
         if monitor:
             monitor.set_step(
                 1, task_name=orch_label, step_label=step_label
             )
         else:
-            console.print(
-                f"[dim]Orchestrator ({suffix}) for step "
-                f"{step_index + 1}/{len(process_run.steps)}...[/dim]"
-            )
+            if suffix == "finalize":
+                console.print(
+                    "[dim]Orchestrator (finalize) for finalization...[/dim]"
+                )
+            else:
+                console.print(
+                    f"[dim]Orchestrator ({suffix}) for step "
+                    f"{step_index + 1}/{len(process_run.steps)}...[/dim]"
+                )
 
         executor = get_executor(
             name="docker",
@@ -390,6 +398,7 @@ def run_process(
                     1,
                     task_name=step.task,
                     step_label=f"Step {step_num}/{total}",
+                    step_index=process_run.current_index,
                 )
             else:
                 console.print(
@@ -628,7 +637,9 @@ def run_process(
 
             if success:
                 if monitor:
-                    monitor.set_worker_done(1, success=True)
+                    monitor.set_worker_done(
+                        1, success=True, step_index=process_run.current_index
+                    )
                 else:
                     console.print(
                         f"[green]Step {step_num}/{total} completed: "
@@ -636,7 +647,9 @@ def run_process(
                     )
             else:
                 if monitor:
-                    monitor.set_worker_done(1, success=False)
+                    monitor.set_worker_done(
+                        1, success=False, step_index=process_run.current_index
+                    )
                 else:
                     console.print(
                         f"[red]Step {step_num}/{total} failed: {step.task} "

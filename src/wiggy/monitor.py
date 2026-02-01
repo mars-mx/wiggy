@@ -170,10 +170,10 @@ class Monitor:
     def start(self) -> None:
         """Start the live display and suppress logging to console."""
         self._start_time = time.monotonic()
-        # Suppress root logger console output while live display is active
-        root_logger = logging.getLogger()
-        self._saved_log_level = root_logger.level
-        root_logger.setLevel(logging.CRITICAL + 1)
+        # Suppress logging while live display is active
+        # Using logging.disable() preserves non-console handlers
+        self._saved_log_level = logging.root.manager.disable
+        logging.disable(logging.CRITICAL)
         self._live.start()
         self._refresh()
 
@@ -182,8 +182,7 @@ class Monitor:
         self._live.stop()
         # Restore logging
         if self._saved_log_level is not None:
-            root_logger = logging.getLogger()
-            root_logger.setLevel(self._saved_log_level)
+            logging.disable(self._saved_log_level)
             self._saved_log_level = None
 
     def set_step(
@@ -192,16 +191,18 @@ class Monitor:
         *,
         task_name: str | None = None,
         step_label: str | None = None,
+        step_index: int | None = None,
     ) -> None:
         """Update the task/step for a worker.
 
-        Also updates the step tracking in the header when task_name
-        matches a known step.
+        Also updates the step tracking in the header when step_index
+        is provided and matches a known step.
 
         Args:
             executor_id: 1-indexed executor ID.
             task_name: Current task name (e.g. "analyse").
             step_label: Step label (e.g. "Step 2/4").
+            step_index: 0-indexed step number for tracking progress.
         """
         with self._lock:
             worker = self._workers.get(executor_id)
@@ -209,31 +210,38 @@ class Monitor:
                 return
             if task_name is not None:
                 worker.task_name = task_name
-                # Update step tracking: mark this step as running
-                for step in self._steps:
-                    if step.name == task_name and step.status == "pending":
-                        step.status = "running"
-                        break
             if step_label is not None:
                 worker.step_label = step_label
+            # Update step tracking by index if provided
+            if step_index is not None and 0 <= step_index < len(self._steps):
+                step = self._steps[step_index]
+                if step.status == "pending":
+                    step.status = "running"
             worker.status = "running"
             worker.last_action = "Starting..."
             self._refresh()
 
-    def set_worker_done(self, executor_id: int, *, success: bool = True) -> None:
-        """Mark a worker as completed."""
+    def set_worker_done(
+        self, executor_id: int, *, success: bool = True, step_index: int | None = None
+    ) -> None:
+        """Mark a worker as completed.
+
+        Args:
+            executor_id: 1-indexed executor ID.
+            success: Whether the worker succeeded.
+            step_index: 0-indexed step number for tracking progress.
+        """
         with self._lock:
             worker = self._workers.get(executor_id)
             if worker is None:
                 return
             worker.status = "done" if success else "failed"
             worker.last_action = "Done" if success else "Failed"
-            # Update step tracking
-            if worker.task_name:
-                for step in self._steps:
-                    if step.name == worker.task_name and step.status == "running":
-                        step.status = "done" if success else "failed"
-                        break
+            # Update step tracking by index if provided
+            if step_index is not None and 0 <= step_index < len(self._steps):
+                step = self._steps[step_index]
+                if step.status == "running":
+                    step.status = "done" if success else "failed"
             self._refresh()
 
     def update(self, executor_id: int, message: ParsedMessage) -> None:
@@ -276,11 +284,18 @@ class Monitor:
     def update_steps(self, step_names: list[str]) -> None:
         """Update the step list (e.g. after dynamic step injection)."""
         with self._lock:
-            # Preserve status of existing steps by name
-            existing = {s.name: s.status for s in self._steps}
+            # Preserve status of existing steps by index to handle duplicate names
+            existing_statuses = [s.status for s in self._steps]
             self._steps = [
-                StepInfo(name=n, status=existing.get(n, "pending"))
-                for n in step_names
+                StepInfo(
+                    name=name,
+                    status=(
+                        existing_statuses[i]
+                        if i < len(existing_statuses)
+                        else "pending"
+                    ),
+                )
+                for i, name in enumerate(step_names)
             ]
             self._refresh()
 

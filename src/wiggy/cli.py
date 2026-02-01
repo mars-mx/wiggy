@@ -1421,14 +1421,11 @@ def process_run(
     # Resolve git author identity for Docker containers
     git_author_name, git_author_email = resolve_git_author(config)
 
-    # Resolve engine name for monitor display
-    _resolved_engine_for_monitor = resolve_engine(engine)
-    _engine_display = _resolved_engine_for_monitor.name if _resolved_engine_for_monitor else (engine or "unknown")
-
     # Create monitor for the process
+    # Use engine name directly for display - actual resolution happens in run_process
     step_names = [step.task for step in spec.steps]
     process_monitor = Monitor(
-        _engine_display,
+        engine or "auto",
         executor_count=1,
         model=model,
         process_name=name,
