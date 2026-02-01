@@ -144,6 +144,7 @@ class Monitor:
         self._lock = Lock()
         self._live = Live(
             console=console,
+            screen=True,
             auto_refresh=False,
             redirect_stderr=False,
             redirect_stdout=False,
